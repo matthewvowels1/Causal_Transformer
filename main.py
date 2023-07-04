@@ -1,5 +1,4 @@
 import argparse
-from typing import Union, Dict, Optional
 from pathlib import Path
 from datasets import generate_data
 import pandas as pd
@@ -8,18 +7,28 @@ import numpy as np
 import trainer
 from model import CaT
 import torch
-import eval
+import matplotlib.pyplot as plt
+
 def main(args):
 	np.random.seed(seed=args.seed)
+	torch.manual_seed(args.seed)
 	device = args.device
 	dataset = args.dataset
 	fn = args.data_path
 
-	all_data, _ = generate_data(N=1000000, seed=args.seed, dataset=dataset)
+	all_data, _, _ = generate_data(N=1000000, seed=args.seed, dataset=dataset, full=True)
 	Y1, Y0 = all_data[:, -2], all_data[:, -1]
 	ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
-	all_data, DAG = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
+	all_data, DAG, var_names = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset, full=False)
+
+	# the last variable in the DAG should be the one that needs to be predicted
+	DAG = DAG.T  # transpose so that e.g. Y can be predicted from Z, R, X etc.
+	# DAG = DAG[:-1, :-1]  # truncate the dag to exclude the last variable (which is the one we want to predict)
+	# DAG[-1, :] = 1.0  # set last row to 1 so that all variables get used  TODO: This needs to be figured out
+
+	Y1, Y0 = all_data[:, -2], all_data[:, -1]
+	emp_ATE = (Y1 - Y0).mean()  # ATE based off a small sample
 
 	df = pd.DataFrame(all_data)
 	df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
@@ -36,13 +45,14 @@ def main(args):
 	print('Training data size:', train_data.shape, ' Validation data size:', val_data.shape)
 	num_vars = real_data.shape[1]
 
-	model = CaT(num_vars=num_vars,
-	            dropout_rate=args.dropout_rate,
+	model = CaT(dropout_rate=args.dropout_rate,
 	            head_size=args.head_size,
 	            num_heads=args.num_heads,
 	            dag=DAG,
 	            n_layers=args.n_layers,
-	            device=device).to(device)
+	            device=device,
+	            pred_column=args.effect_column,
+	            continuous_outcome=args.continuous_outcome).to(device)
 
 	optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
 
@@ -58,7 +68,8 @@ def main(args):
 		              batch_size=args.batch_size,
 		              save_iter=args.save_iter,
 		              model_save_path=args.model_save_path,
-		              optimizer=optimizer
+		              optimizer=optimizer,
+		              continuous_outcome=args.continuous_outcome
 		              )
 
 	else:  # if existing checkpoint file is given, compare iteration against max_iters and finish training if necessary
@@ -79,12 +90,54 @@ def main(args):
 			              batch_size=args.batch_size,
 			              save_iter=args.save_iter,
 			              model_save_path=args.model_save_path,
-			              optimizer=optimizer, start_iter=checkpoint_iter
+			              optimizer=optimizer, start_iter=checkpoint_iter,
+		              continuous_outcome=args.continuous_outcome
 			              )
 
 	# Evaluate the model
-	est_ATE = eval.eval(model=model, data=real_data, device=device, int_column=args.intervention_column)
-	print(ATE, est_ATE)
+	risk, bas = trainer.risk_eval(model=model,
+	         data=real_data,
+	         device=device,
+		              continuous_outcome=args.continuous_outcome)
+
+	print('RISK:', risk)
+	if not args.continuous_outcome:
+		print('BAS:', bas)
+
+
+	est_ATE = trainer.intervention_eval(model=model,
+	                    data=real_data,
+	                    device=device,
+	                    int_column=args.intervention_column)
+
+	print('True ATE:', ATE, 'Empirical ATE:', emp_ATE, ' Estimated ATE:', est_ATE.item())
+
+	maps = []
+	for j in range(args.n_layers):
+		heads = model.blocks[j].sa.heads
+		for i in range(args.num_heads):
+			maps.append(heads[i].wei.mean(0).cpu().detach().numpy())
+
+	maps = np.stack(maps).mean(0)
+	fig, ax = plt.subplots()
+	im = ax.imshow(maps, cmap='hot', interpolation='nearest')
+	cbar = ax.figure.colorbar(im, ax=ax, shrink=1)
+	# Setting the axis tick labels
+	ax.set_xticks(np.arange(len(var_names)-1))
+	ax.set_yticks(np.arange(len(var_names)-1))
+
+	ax.set_xticklabels(var_names[:-1])
+	ax.set_yticklabels(var_names[:-1])
+
+	# Rotating the tick labels inorder to set their alignment.
+	plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+	         rotation_mode="anchor")
+
+	fig.tight_layout()
+	plt.show()
+
+
+
 
 
 
@@ -222,6 +275,19 @@ if __name__ == '__main__':
 		type=int,
 		default=10,
 		help="Column index to perform an intervention and evaluate the causal effect."
+	)
+
+	parser.add_argument(
+		"--effect_column",
+		type=int,
+		default=12,
+		help="Column index to predict]."
+	)
+
+	parser.add_argument(
+		"--continuous_outcome",
+		default=True, action=argparse.BooleanOptionalAction,
+		help="Whether the effect/outcome is continuous or binary."
 	)
 
 	args = parser.parse_args()

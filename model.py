@@ -2,6 +2,7 @@ import tiktoken
 import torch
 from torch.nn import functional as F
 import torch.nn as nn
+from sklearn.metrics import balanced_accuracy_score
 
 # adapted from example GPT code  https://github.com/karpathy/ng-video-lecture
 class Head(nn.Module):
@@ -14,22 +15,23 @@ class Head(nn.Module):
 		# dag will determine what variables can communicate with each other
 		self.register_buffer('dag', dag)
 		self.dropout = nn.Dropout(dropout_rate)
+
+		self.wei = None
 	def forward(self, X):
-		B, T, C = X.shape  # batch size, time steps, channels
+		# B, T, C = X.shape  batch size, time steps, channels
 		K = self.key(X)  # B, T, hs
 		Q = self.query(X)  # B, T, hs
 
-		wei = Q @ K.transpose(-2, -1) * K.shape[-1] ** -0.5  # (B,T,hs) @ (B,hs,T) -> (B,T,T)
-		wei = wei.masked_fill(self.dag == 0, float('-inf'))  # (B, T, T)
+		self.wei = Q @ K.transpose(-2, -1) * K.shape[-1] ** -0.5
+		self.wei = self.wei.masked_fill(self.dag == 0, float('-inf'))
 
-		inf_rows = torch.all(wei == float('-inf'), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-		all_inf_mask = inf_rows.unsqueeze(-1).expand_as(wei)
-		wei[all_inf_mask] = 0.0  # set any rows which are all -inf (because they have no causal parents) to 0 to avoid nans
-
-		wei = F.softmax(wei, dim=-1)  # B,T,T
-		wei = self.dropout(wei)
-		V = self.value(X)  # B, T, hs
-		out = wei @ V  # (B, T, T) @ (B, T, hs) ->  (B, T, hs)
+		self.wei = F.softmax(self.wei, dim=-1)
+		nan_rows = torch.any(torch.isnan(self.wei), dim=-1) # check if any rows are <all> -inf, these need to be masked to 0
+		nan_mask = nan_rows.unsqueeze(-1).expand_as(self.wei)
+		self.wei = torch.where(nan_mask, torch.zeros_like(self.wei), self.wei) # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+		self.wei = self.dropout(self.wei)
+		V = self.value(X)
+		out = self.wei @ V
 		return out
 
 class MultiHeadAttention(nn.Module):
@@ -57,43 +59,52 @@ class FF(nn.Module):
 		)
 
 	def forward(self, X):
-		return self.net(X)
+		out = self.net(X)
+		return out
 
 
 class Block(nn.Module):
 
 	def __init__(self, n_embed, num_heads, head_size,  dropout_rate, dag):
 		super().__init__()
-		self.sa = MultiHeadAttention( num_heads, head_size, dropout_rate, dag)
-
+		self.sa = MultiHeadAttention(num_heads, head_size, dropout_rate, dag)
 		self.ff = FF(n_embed, dropout_rate)
 
 	def forward(self, X):
+
 		X = X + self.sa(X)  # with residual skip connection and learnable normalization of features
+
 		X = X + self.ff(X)  # with residual skip connection and learnable normalization of features
+
 		return X
 
 
 class CaT(nn.Module):
 
-	def __init__(self, num_vars, dropout_rate, num_heads, head_size, n_layers, dag, device):
+	def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, pred_column=None, continuous_outcome=True):
 		super().__init__()
+		self.pred_column = pred_column
 		self.dag = torch.tensor(dag).to(device)
 		self.device = device
 		self.blocks = nn.Sequential(
 			*[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=self.dag) for _ in range(n_layers)])
-		self.lm_head = nn.Linear(1, num_vars)  # goes from embedding to vocab size
-		self.mse_loss = torch.nn.MSELoss()
-
+		self.lm_head = nn.Linear(1, 1)
+		self.loss_func = torch.nn.MSELoss() if continuous_outcome else torch.nn.BCEWithLogitsLoss()
+		self.continuous_outcome = continuous_outcome
 	def forward(self, X, targets=None):
 		X = X[:, :, None]  # (B, num_vars, C=1)
 		X = self.blocks(X)  # B, num_vars, head_size
-		X = self.lm_head(X)  # (B, T, vocab_size
-		X = X[:, :, 0]
+
+		X = self.lm_head(X)
+
+		X = X[:, -1, 0] if self.continuous_outcome else torch.sigmoid(X[:, -1, 0])
+
 		if targets == None:
 			return X
 		else:
-			loss = self.mse_loss(X, targets)
+
+			loss = self.loss_func(X, targets[:, self.pred_column])  # pull out the Y variable as the target
+
 			return X, loss
 
 

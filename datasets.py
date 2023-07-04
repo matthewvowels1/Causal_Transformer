@@ -8,7 +8,7 @@ def inv_sigm(x):
     return np.log(x/(1-x))
 
 
-def generate_data(N, seed, dataset):
+def generate_data(N, seed, dataset, full=True):
     np.random.seed(seed=seed)
     if dataset == 'general':
         # confounders
@@ -87,12 +87,27 @@ def generate_data(N, seed, dataset):
         # set M -> Y links
         DAG[(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]):(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]),
         (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]):(
-		        Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1])] = 1
+                Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1])] = 1
 
         # set Y -> C links
         DAG[(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]):(
-			        Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]),
+                    Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]),
         (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]):(
-		        Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1] + C.shape[1])] = 1
+                Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1] + C.shape[1])] = 1
 
-    return np.concatenate([Z, R, I, X, M, Y, C, Y1, Y0], 1), DAG
+    var_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'R1', 'R2', 'I1', 'I2', 'X', 'M', 'Y', 'C']
+
+    if full == False:
+        var_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'R1', 'R2',  'X',  'Y']
+        DAG = np.delete(DAG, 7, 0)  # remove I1
+        DAG = np.delete(DAG, 7, 1)
+        DAG = np.delete(DAG, 7, 0)  # remove I2
+        DAG = np.delete(DAG, 7, 1)
+        DAG = np.delete(DAG, 8, 0)  # remove M
+        DAG = np.delete(DAG, 8, 1)
+        DAG = np.delete(DAG, 9, 0)  # remove C
+        DAG = np.delete(DAG, 9, 1)
+        return_stuff = np.concatenate([Z, R, X, Y, Y1, Y0], 1)
+    else:
+        return_stuff =  np.concatenate([Z, R, I, X, M, Y, C, Y1, Y0], 1)
+    return return_stuff, DAG, var_names
