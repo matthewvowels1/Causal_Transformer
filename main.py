@@ -123,11 +123,11 @@ def main(args):
 	im = ax.imshow(maps, cmap='hot', interpolation='nearest')
 	cbar = ax.figure.colorbar(im, ax=ax, shrink=1)
 	# Setting the axis tick labels
-	ax.set_xticks(np.arange(len(var_names)-1))
-	ax.set_yticks(np.arange(len(var_names)-1))
+	ax.set_xticks(np.arange(len(var_names)))
+	ax.set_yticks(np.arange(len(var_names)))
 
-	ax.set_xticklabels(var_names[:-1])
-	ax.set_yticklabels(var_names[:-1])
+	ax.set_xticklabels(var_names)
+	ax.set_yticklabels(var_names)
 
 	# Rotating the tick labels inorder to set their alignment.
 	plt.setp(ax.get_xticklabels(), rotation=45, ha="right",

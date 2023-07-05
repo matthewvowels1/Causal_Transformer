@@ -97,7 +97,7 @@ class CaT(nn.Module):
 
 		X = self.lm_head(X)
 
-		X = X[:, -1, 0] if self.continuous_outcome else torch.sigmoid(X[:, -1, 0])
+		X = X[:, -2, 0] if self.continuous_outcome else torch.sigmoid(X[:, -2, 0])
 
 		if targets == None:
 			return X

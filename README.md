@@ -1,7 +1,14 @@
 # Causal_Transformer
 CaT - Causal Transformer
 
-TODO: sort out causal ordering so that the mask can be used to predict all intermediate variables
+TODO:
+- Make DAG a networkx object
+- based on the networkX object, find topological ordering of the variables
+- find a solution to deal with variables which have the same topological position in the causal ordering
+- get the model to predict all positions in the causal ordering (as in a regular transformer)
+- create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
+- automatically derive ATE estimates for all paths by iterating through the structure
+
 
 Run using ```conda activate nlp_gpt_env```
 
