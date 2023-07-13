@@ -8,6 +8,7 @@ import trainer
 from model import CaT
 import torch
 import matplotlib.pyplot as plt
+import networkx as nx
 
 def main(args):
 	np.random.seed(seed=args.seed)
@@ -16,18 +17,15 @@ def main(args):
 	dataset = args.dataset
 	fn = args.data_path
 
-	all_data, _, _ = generate_data(N=1000000, seed=args.seed, dataset=dataset, full=True)
-	Y1, Y0 = all_data[:, -2], all_data[:, -1]
+	_, _, _, Y0, Y1 = generate_data(N=1000000, seed=args.seed, dataset=dataset, full=True)
+
 	ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
-	all_data, DAG, var_names = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset, full=False)
+	all_data, DAG, var_names, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset, full=False)
+
+	DAG = nx.to_numpy_array(DAG)
 
 	# the last variable in the DAG should be the one that needs to be predicted
-	DAG = DAG.T  # transpose so that e.g. Y can be predicted from Z, R, X etc.
-	# DAG = DAG[:-1, :-1]  # truncate the dag to exclude the last variable (which is the one we want to predict)
-	# DAG[-1, :] = 1.0  # set last row to 1 so that all variables get used  TODO: This needs to be figured out
-
-	Y1, Y0 = all_data[:, -2], all_data[:, -1]
 	emp_ATE = (Y1 - Y0).mean()  # ATE based off a small sample
 
 	df = pd.DataFrame(all_data)

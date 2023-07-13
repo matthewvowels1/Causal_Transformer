@@ -1,6 +1,8 @@
 import numpy as np
-import os
-# import networkx
+import networkx as nx
+from networkx.drawing.nx_agraph import graphviz_layout
+import matplotlib.pyplot as plt
+
 
 def sigm(x):
     return 1/(1 + np.exp(-x))
@@ -9,7 +11,30 @@ def inv_sigm(x):
     return np.log(x/(1-x))
 
 
-def generate_data(N, seed, dataset, full=True):
+def reorder_dag(dag):
+    '''Takes a networkx digraph object and returns a topologically sorted graph.'''
+
+    assert nx.is_directed_acyclic_graph(dag), 'Graph needs to be acyclic.'
+
+    old_ordering = list(dag.nodes())  # get old ordering of nodes
+    adj_mat = nx.to_numpy_array(dag)  # get adjacency matrix of old graph
+
+    index_old = {v: i for i, v in enumerate(old_ordering)}
+    topological_ordering = list(nx.topological_sort(dag))  # get ideal topological ordering of nodes
+
+    permutation_vector = [index_old[v] for v in topological_ordering]  # get required permutation of old ordering
+
+    reordered_adj = adj_mat[np.ix_(permutation_vector, permutation_vector)]  # reorder old adj. mat
+
+    dag = nx.from_numpy_array(reordered_adj, create_using=nx.DiGraph)  # overwrite original dag
+
+    mapping = dict(zip(dag, topological_ordering))  # assign node names
+    dag = nx.relabel_nodes(dag, mapping)
+
+    return dag
+
+
+def generate_data(N, seed, dataset):
     np.random.seed(seed=seed)
     if dataset == 'general':
         # confounders
@@ -19,17 +44,14 @@ def generate_data(N, seed, dataset, full=True):
         z4 = np.round(np.random.uniform(0, 5, (N, 1)), 0)
         uz5 = np.random.randn(N, 1)
         z5 = 0.2 * z1 + uz5
-        Z = np.concatenate([z1, z2, z3, z4, z5], 1)
 
         # risk vars:
         r1 = np.random.randn(N, 1)
         r2 = np.random.randn(N, 1)
-        R = np.concatenate([r1, r2], 1)
 
         # instrumental vars:
         i1 = np.random.randn(N, 1)
         i2 = np.random.randn(N, 1)
-        I = np.concatenate([i1, i2], 1)
 
         # treatment:
         ux = np.random.randn(N, 1)
@@ -54,61 +76,24 @@ def generate_data(N, seed, dataset, full=True):
         # colliders:
         C = 0.6 * Y + 0.4 * X + 0.4 * np.random.randn(N, 1)
 
+        DAGnx = nx.DiGraph()
+        DAGnx.add_edges_from([('Z1', 'Z5'), ('Z2', 'X'), ('Z3', 'X'), ('Z4', 'X'), ('Z5', 'X'),
+                              ('Z2', 'Y'), ('Z3', 'Y'), ('Z4', 'Y'), ('Z5', 'Y'),
+                              ('R1', 'Y'), ('R2', 'Y'), ('M', 'Y'),
+                              ('I1', 'X'), ('I2', 'X'), ('X', 'M'), ('X', 'Y'), ('X', 'C'),
+                              ('Y', 'C')])
 
-        # DAG creation (there is a one in position (i,j) if there is an arrow from i to j and zero otherwise)
-        num_vars = Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1] + C.shape[1]
-        DAG = np.zeros((num_vars, num_vars))
+        DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
+        var_names = list(DAGnx.nodes())
 
-        # set Z -> X and Z -> Y links
-        DAG[0:Z.shape[1], Z.shape[1] + R.shape[1] + I.shape[1] : Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]] = 1
-        DAG[0:Z.shape[1], Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] : Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]] = 1
+        all_data_dict = {'Z1': z1, 'Z2': z2, 'Z3': z3, 'Z4': z4, 'Z5': z5, 'X': X, 'M': M, 'I1': i1,
+                         'I2': i2, 'R1': r1, 'R2': r2, 'Y': Y, 'C': C}
 
-        # set R -> Y links
-        DAG[Z.shape[1]:(Z.shape[1] + R.shape[1]),
-        Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] : Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]] = 1
+        all_data = (np.stack([all_data_dict[key] for key in var_names], axis=-1))[:, 0, :]
 
-        # set I -> X links
-        DAG[(Z.shape[1] + R.shape[1]):(Z.shape[1] + R.shape[1] + I.shape[1]),
-        Z.shape[1] + R.shape[1] + I.shape[1] : Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]] = 1
+        plt.title('general')
+        pos = graphviz_layout(DAGnx, prog='dot')
+        nx.draw_networkx(DAGnx, pos, with_labels=True, arrows=True)
+        plt.savefig('general_graph.png')
 
-        # set X -> M links
-        DAG[(Z.shape[1] + R.shape[1] + I.shape[1]):(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]),
-        (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]) : (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1])] = 1
-
-        # set X->C links
-        DAG[(Z.shape[1] + R.shape[1] + I.shape[1]):(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]),
-        (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1] ):(
-                    Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1] + C.shape[1])] = 1
-
-        # set X->Y links
-        DAG[(Z.shape[1] + R.shape[1] + I.shape[1]):(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]),
-        (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]):(
-                    Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1])] = 1
-
-        # set M -> Y links
-        DAG[(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1]):(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]),
-        (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]):(
-                Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1])] = 1
-
-        # set Y -> C links
-        DAG[(Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1]):(
-                    Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]),
-        (Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1]):(
-                Z.shape[1] + R.shape[1] + I.shape[1] + X.shape[1] + M.shape[1] + Y.shape[1] + C.shape[1])] = 1
-
-    var_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'R1', 'R2', 'I1', 'I2', 'X', 'M', 'Y', 'C']
-
-    if full == False:
-        var_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'R1', 'R2',  'X',  'Y']
-        DAG = np.delete(DAG, 7, 0)  # remove I1
-        DAG = np.delete(DAG, 7, 1)
-        DAG = np.delete(DAG, 7, 0)  # remove I2
-        DAG = np.delete(DAG, 7, 1)
-        DAG = np.delete(DAG, 8, 0)  # remove M
-        DAG = np.delete(DAG, 8, 1)
-        DAG = np.delete(DAG, 9, 0)  # remove C
-        DAG = np.delete(DAG, 9, 1)
-        return_stuff = np.concatenate([Z, R, X, Y, Y1, Y0], 1)
-    else:
-        return_stuff =  np.concatenate([Z, R, I, X, M, Y, C, Y1, Y0], 1)
-    return return_stuff, DAG, var_names
+    return all_data, DAGnx, var_names, Y0, Y1

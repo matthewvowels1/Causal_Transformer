@@ -105,6 +105,7 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
         optimizer.step()
 
         if (iter_ > 1 ) and (iter_ != start_iter) and ((iter_ + 1) % save_iter == 0):
+            print('Saving model checkpoint.')
             torch.save({
                 'iteration': iter_,
                 'model_state_dict': model.state_dict(),
