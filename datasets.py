@@ -35,6 +35,15 @@ def reorder_dag(dag):
 
 
 def generate_data(N, seed, dataset):
+    '''
+    :param N: required sample size
+    :param seed: random seed
+    :param dataset: which dataset to use (only 'general' currently implemented)
+    :return: data (DxN), a DAG (networkX), a list of variable names, Y0 and Y1 (vectors of counterfactual outcomes)
+
+    Note that the data, the DAG, and the variable names are topologically sorted.
+    '''
+
     np.random.seed(seed=seed)
     if dataset == 'general':
         # confounders

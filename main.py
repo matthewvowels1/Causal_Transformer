@@ -17,13 +17,13 @@ def main(args):
 	dataset = args.dataset
 	fn = args.data_path
 
-	_, _, _, Y0, Y1 = generate_data(N=1000000, seed=args.seed, dataset=dataset, full=True)
+	_, _, _, Y0, Y1 = generate_data(N=1000000, seed=args.seed, dataset=dataset)
 
 	ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
-	all_data, DAG, var_names, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset, full=False)
+	all_data, DAG, var_names, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
 
-	DAG = nx.to_numpy_array(DAG)
+	DAG = nx.to_numpy_array(DAG)   # this will be the adjacency matrix
 
 	# the last variable in the DAG should be the one that needs to be predicted
 	emp_ATE = (Y1 - Y0).mean()  # ATE based off a small sample
@@ -31,17 +31,16 @@ def main(args):
 	df = pd.DataFrame(all_data)
 	df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
 
-	real_data = all_data[:, :-2]   # exclude the counterfactual columns Y1 and Y0
-	indices = np.arange(0, len(real_data))
+	indices = np.arange(0, len(all_data))
 	np.random.shuffle(indices)
 
 	val_inds = indices[:int(args.validation_fraction*len(indices))]
 	train_inds = indices[int(args.validation_fraction*len(indices)):]
-	train_data = real_data[train_inds]
-	val_data = real_data[val_inds]
+	train_data = all_data[train_inds]
+	val_data = all_data[val_inds]
 
 	print('Training data size:', train_data.shape, ' Validation data size:', val_data.shape)
-	num_vars = real_data.shape[1]
+	num_vars = all_data.shape[1]
 
 	model = CaT(dropout_rate=args.dropout_rate,
 	            head_size=args.head_size,
@@ -94,7 +93,7 @@ def main(args):
 
 	# Evaluate the model
 	risk, bas = trainer.risk_eval(model=model,
-	         data=real_data,
+	         data=all_data,
 	         device=device,
 		              continuous_outcome=args.continuous_outcome)
 
@@ -104,7 +103,7 @@ def main(args):
 
 
 	est_ATE = trainer.intervention_eval(model=model,
-	                    data=real_data,
+	                    data=all_data,
 	                    device=device,
 	                    int_column=args.intervention_column)
 
