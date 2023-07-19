@@ -10,15 +10,14 @@ def predict(model, data, device):
     data = torch.from_numpy(data).float().to(device)
     return model.forward(data)
 
-def risk_eval(model, data,  device, continuous_outcome=True):
+def risk_eval(model, data,  device):
     bas = None
     data_mod = data.copy()
     # data_mod = data_mod[:, :-1]
 
     preds = predict(model, data_mod, device).cpu().detach().numpy()
     risk = ((preds - data[:, -1])**2).mean()
-    if not continuous_outcome:
-        bas = balanced_accuracy_score(data[:, -1], np.round(preds))
+    bas = balanced_accuracy_score(data[:, -1], np.round(preds))
     return risk, bas
 
 
@@ -29,8 +28,6 @@ def intervention_eval(model, data, int_column, device):
     d0[:, int_column] = 0.0
     d1[:, int_column] = 1.0
 
-    # d0 = d0[:, :-1]
-    # d1 = d1[:, :-1]
     preds_d0 = (predict(model, d0, device)).cpu().detach().numpy()
     preds_d1 = (predict(model, d1, device)).cpu().detach().numpy()
 
@@ -46,7 +43,7 @@ def get_batch(train_data, val_data, split, device, batch_size):
     return x.to(device)
 
 @torch.no_grad()
-def estimate_loss(model, train_data, val_data, batch_size, eval_iters, device, continuous_outcome):
+def estimate_loss(model, train_data, val_data, batch_size, eval_iters, device):
     out = {}
     bas_ = {}
     model.eval()
@@ -60,21 +57,19 @@ def estimate_loss(model, train_data, val_data, batch_size, eval_iters, device, c
             preds, loss = model(X=xb_mod, targets=xb)
             losses[k] = loss.item()
 
-            if not continuous_outcome:
-                preds = preds.cpu().detach().numpy()
-                bas = balanced_accuracy_score(xb[:, -1].cpu().detach().numpy(), np.round(preds))
-                basses.append(bas)
+            preds = preds.cpu().detach().numpy()
+            bas = balanced_accuracy_score(xb[:, -1].cpu().detach().numpy(), np.round(preds))
+            basses.append(bas)
 
         out[split] = losses.mean()
 
-        if not continuous_outcome:
-            bas_[split] = np.stack(basses).mean()
+        bas_[split] = np.stack(basses).mean()
 
     model.train()
     return out, bas_
 
 
-def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter, model_save_path, optimizer, start_iter=None, continuous_outcome=True):
+def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter, model_save_path, optimizer, start_iter=None):
     train_data, val_data = torch.from_numpy(train_data).float(),  torch.from_numpy(val_data).float()
 
     if start_iter == None:
@@ -91,11 +86,11 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
                           val_data=val_data,
                           eval_iters=eval_iters,
                           batch_size=batch_size,
-                          device=device, continuous_outcome=continuous_outcome)
+                          device=device)
 
             print(f"step {iter_}: train_loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            if not continuous_outcome:
-                print(f"BAS train {bas['train']:.4f}, BAS val {bas['val']:.4f}")
+
+            print(f"BAS train {bas['train']:.4f}, BAS val {bas['val']:.4f}")
 
 
         X, loss = model(X=xb_mod, targets=xb)

@@ -47,8 +47,9 @@ def main(args):
 	            dag=DAG,
 	            n_layers=args.n_layers,
 	            device=device,
-	            pred_column=args.effect_column,
-	            continuous_outcome=args.continuous_outcome).to(device)
+	            var_names=var_names,
+	            var_types=var_types
+	            ).to(device)
 
 	optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
 
@@ -64,8 +65,7 @@ def main(args):
 		              batch_size=args.batch_size,
 		              save_iter=args.save_iter,
 		              model_save_path=args.model_save_path,
-		              optimizer=optimizer,
-		              continuous_outcome=args.continuous_outcome
+		              optimizer=optimizer
 		              )
 
 	else:  # if existing checkpoint file is given, compare iteration against max_iters and finish training if necessary
@@ -86,19 +86,17 @@ def main(args):
 			              batch_size=args.batch_size,
 			              save_iter=args.save_iter,
 			              model_save_path=args.model_save_path,
-			              optimizer=optimizer, start_iter=checkpoint_iter,
-		              continuous_outcome=args.continuous_outcome
+			              optimizer=optimizer, start_iter=checkpoint_iter
 			              )
 
 	# Evaluate the model
 	risk, bas = trainer.risk_eval(model=model,
 	         data=all_data,
-	         device=device,
-		              continuous_outcome=args.continuous_outcome)
+	         device=device)
 
-	print('RISK:', risk)
-	if not args.continuous_outcome:
-		print('BAS:', bas)
+	# print('RISK:', risk)
+	# if not args.continuous_outcome:
+	# 	print('BAS:', bas)
 
 	est_ATE = trainer.intervention_eval(model=model,
 	                    data=all_data,
@@ -268,19 +266,6 @@ if __name__ == '__main__':
 		type=int,
 		default=10,
 		help="Column index to perform an intervention and evaluate the causal effect."
-	)
-
-	parser.add_argument(
-		"--effect_column",
-		type=int,
-		default=12,
-		help="Column index to predict]."
-	)
-
-	parser.add_argument(
-		"--continuous_outcome",
-		default=True, action=argparse.BooleanOptionalAction,
-		help="Whether the effect/outcome is continuous or binary."
 	)
 
 	args = parser.parse_args()
