@@ -87,13 +87,13 @@ class MixedLoss(nn.Module):
     def forward(self, pred, target):
         total_loss = 0
 
-        for i, var_type in enumerate(self.var_types.values()):
+        for i, var_type in enumerate(self.var_types_sorted.values()):
             if var_type == 'cont':
-                total_loss += self.mse_loss(pred[:, i], target[:, i])
+                total_loss += self.cont_loss(pred[:, i], target[:, i])
             elif var_type == 'bin':
-                total_loss += self.bce_loss(pred[:, i], target[:, i])
+                total_loss += self.bin_loss(pred[:, i], target[:, i])
             elif var_type == 'cat':
-                total_loss += self.ce_loss(pred[:, i].unsqueeze(0), target[:, i].long())
+                total_loss += self.cat_loss(pred[:, i].unsqueeze(0), target[:, i].long())
 
         return total_loss
 

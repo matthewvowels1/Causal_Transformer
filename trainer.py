@@ -42,31 +42,6 @@ def get_batch(train_data, val_data, split, device, batch_size):
     x = data[ix]
     return x.to(device)
 
-@torch.no_grad()
-def estimate_loss(model, train_data, val_data, batch_size, eval_iters, device):
-    out = {}
-    bas_ = {}
-    model.eval()
-    for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
-        basses = []
-        for k in range(eval_iters):
-            xb = get_batch(train_data, val_data, split, device, batch_size)
-            xb_mod = torch.clone(xb.detach())
-            # xb_mod = xb_mod[:, : -1]
-            preds, loss = model(X=xb_mod, targets=xb)
-            losses[k] = loss.item()
-
-            preds = preds.cpu().detach().numpy()
-            bas = balanced_accuracy_score(xb[:, -1].cpu().detach().numpy(), np.round(preds))
-            basses.append(bas)
-
-        out[split] = losses.mean()
-
-        bas_[split] = np.stack(basses).mean()
-
-    model.train()
-    return out, bas_
 
 
 def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter, model_save_path, optimizer, start_iter=None):
@@ -76,24 +51,26 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
         start_iter = 0
 
     for iter_ in range(start_iter, max_iters):
+        model.train()
         xb = get_batch(train_data=train_data, val_data=val_data, split='train', device=device, batch_size=batch_size)
         xb_mod = torch.clone(xb.detach())
-        # xb_mod = xb_mod[:, :-1]   # exclude last variable (which is the one we wish to predict)
 
         if iter_ % eval_interval == 0:
-            losses, bas = estimate_loss(model=model,
-                          train_data=train_data,
-                          val_data=val_data,
-                          eval_iters=eval_iters,
-                          batch_size=batch_size,
-                          device=device)
+            model.eval()
+            eval_loss = {}
+            for split in ['train', 'val']:
+                losses = torch.zeros(eval_iters)
+                for k in range(eval_iters):
 
-            print(f"step {iter_}: train_loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+                    xb = get_batch(train_data=train_data, val_data=val_data, split=split, device=device,
+                                   batch_size=batch_size)
+                    X, loss = model(X=xb, targets=xb_mod)
+                    losses[k] = loss.item()
+                eval_loss[split] = losses.mean()
+            model.train()
+            print(f"step {iter_}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
 
-            print(f"BAS train {bas['train']:.4f}, BAS val {bas['val']:.4f}")
-
-
-        X, loss = model(X=xb_mod, targets=xb)
+        X, loss = model(X=xb, targets=xb_mod)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -110,6 +87,6 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
 
     xb = get_batch(train_data=train_data, val_data=val_data, split='train', device=device, batch_size=batch_size)
     xb_mod = torch.clone(xb.detach())
-    # xb_mod = xb_mod[:, :-1]  # exclude last variable (which is the one we wish to predict)
-    X, loss = model(X=xb_mod, targets=xb)
+
+    X, loss = model(X=xb, targets=xb_mod)
     return loss

@@ -5,7 +5,7 @@ TODO:
 - [DONE] Make DAG a networkx object
 - Change losses and predictions
 - [DONE] based on the networkX object, find topological ordering of the variables
-- we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
+- [DONE] we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
 - find a solution to deal with variables which have the same topological position in the causal ordering
 - get the model to predict all positions in the causal ordering (as in a regular transformer)
 - create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
@@ -20,7 +20,6 @@ checkpoints/model_10000_0.51.ckpt
 python3 main.py --dataset general \
 --max_iters 20000 \
 --intervention_column 7  \
---effect_column 8 \
 --validation_fraction 0.3 \
 --sample_size 5000  \
 --device cuda \
@@ -35,5 +34,5 @@ python3 main.py --dataset general \
 --num_heads 4 \
 --head_size 4 \
 --dropout_rate 0.3 \
---n_layers 4 \
---no-continuous_outcome
+--n_layers 4 
+
