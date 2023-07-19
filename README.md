@@ -2,9 +2,10 @@
 CaT - Causal Transformer
 
 TODO:
-- Make DAG a networkx object
+- [DONE] Make DAG a networkx object
 - Change losses and predictions
-- based on the networkX object, find topological ordering of the variables
+- [DONE] based on the networkX object, find topological ordering of the variables
+- we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
 - find a solution to deal with variables which have the same topological position in the causal ordering
 - get the model to predict all positions in the causal ordering (as in a regular transformer)
 - create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position

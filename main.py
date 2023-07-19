@@ -17,11 +17,10 @@ def main(args):
 	dataset = args.dataset
 	fn = args.data_path
 
-	_, _, _, Y0, Y1 = generate_data(N=1000000, seed=args.seed, dataset=dataset)
-
+	_, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=args.seed, dataset=dataset)
 	ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
-	all_data, DAG, var_names, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
+	all_data, DAG, var_names, var_types, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
 
 	DAG = nx.to_numpy_array(DAG)   # this will be the adjacency matrix
 
@@ -100,7 +99,6 @@ def main(args):
 	print('RISK:', risk)
 	if not args.continuous_outcome:
 		print('BAS:', bas)
-
 
 	est_ATE = trainer.intervention_eval(model=model,
 	                    data=all_data,

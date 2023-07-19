@@ -39,7 +39,7 @@ def generate_data(N, seed, dataset):
     :param N: required sample size
     :param seed: random seed
     :param dataset: which dataset to use (only 'general' currently implemented)
-    :return: data (DxN), a DAG (networkX), a list of variable names, Y0 and Y1 (vectors of counterfactual outcomes)
+    :return: data (DxN), a DAG (networkX), a list of variable names, Y0 and Y1 (vectors of counterfactual outcomes), a list of variable types
 
     Note that the data, the DAG, and the variable names are topologically sorted.
     '''
@@ -93,10 +93,14 @@ def generate_data(N, seed, dataset):
                               ('Y', 'C')])
 
         DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
-        var_names = list(DAGnx.nodes())
+        var_names = list(DAGnx.nodes())  # topologically ordered list of variables
 
         all_data_dict = {'Z1': z1, 'Z2': z2, 'Z3': z3, 'Z4': z4, 'Z5': z5, 'X': X, 'M': M, 'I1': i1,
                          'I2': i2, 'R1': r1, 'R2': r2, 'Y': Y, 'C': C}
+
+        # types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
+        var_types = {'Z1': 'cont', 'Z2': 'cont', 'Z3': 'cont', 'Z4': 'cont', 'Z5': 'cont', 'X': 'bin', 'M': 'cont', 'I1': 'cont',
+                         'I2': 'cont', 'R1': 'cont', 'R2': 'cont', 'Y': 'bin', 'C': 'cont'}
 
         all_data = (np.stack([all_data_dict[key] for key in var_names], axis=-1))[:, 0, :]
 
@@ -105,4 +109,4 @@ def generate_data(N, seed, dataset):
         nx.draw_networkx(DAGnx, pos, with_labels=True, arrows=True)
         plt.savefig('general_graph.png')
 
-    return all_data, DAGnx, var_names, Y0, Y1
+    return all_data, DAGnx, var_names, var_types, Y0, Y1
