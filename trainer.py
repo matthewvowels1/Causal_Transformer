@@ -51,11 +51,18 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
         start_iter = 0
 
     for iter_ in range(start_iter, max_iters):
+        # train and update the model
         model.train()
         xb = get_batch(train_data=train_data, val_data=val_data, split='train', device=device, batch_size=batch_size)
         xb_mod = torch.clone(xb.detach())
 
-        if iter_ % eval_interval == 0:
+        X, loss = model(X=xb, targets=xb_mod)
+
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+        if iter_ % eval_interval == 0:  # evaluate the loss (no gradients)
             model.eval()
             eval_loss = {}
             for split in ['train', 'val']:
@@ -70,11 +77,6 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
             model.train()
             print(f"step {iter_}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
 
-        X, loss = model(X=xb, targets=xb_mod)
-
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
 
         if (iter_ > 1 ) and (iter_ != start_iter) and ((iter_ + 1) % save_iter == 0):
             print('Saving model checkpoint.')
@@ -85,8 +87,4 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
                 'loss': loss,
             }, os.path.join(model_save_path, 'model_{}_{}.ckpt'.format(iter_+1, np.round(loss.item(), 2))))
 
-    xb = get_batch(train_data=train_data, val_data=val_data, split='train', device=device, batch_size=batch_size)
-    xb_mod = torch.clone(xb.detach())
-
-    X, loss = model(X=xb, targets=xb_mod)
-    return loss
+    print('Finished training!')
