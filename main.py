@@ -20,7 +20,7 @@ def main(args):
 	_, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=args.seed, dataset=dataset)
 	ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
-	all_data, DAG, var_names, var_types, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
+	all_data, DAG, causal_ordering, var_types, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
 
 	DAG = nx.to_numpy_array(DAG)   # this will be the adjacency matrix
 
@@ -39,7 +39,6 @@ def main(args):
 	val_data = all_data[val_inds]
 
 	print('Training data size:', train_data.shape, ' Validation data size:', val_data.shape)
-	num_vars = all_data.shape[1]
 
 	model = CaT(dropout_rate=args.dropout_rate,
 	            head_size=args.head_size,
@@ -47,7 +46,6 @@ def main(args):
 	            dag=DAG,
 	            n_layers=args.n_layers,
 	            device=device,
-	            var_names=var_names,
 	            var_types=var_types
 	            ).to(device)
 
@@ -89,21 +87,7 @@ def main(args):
 			              optimizer=optimizer, start_iter=checkpoint_iter
 			              )
 
-	# Evaluate the model
-	risk, bas = trainer.risk_eval(model=model,
-	         data=all_data,
-	         device=device)
 
-	# print('RISK:', risk)
-	# if not args.continuous_outcome:
-	# 	print('BAS:', bas)
-
-	est_ATE = trainer.intervention_eval(model=model,
-	                    data=all_data,
-	                    device=device,
-	                    int_column=args.intervention_column)
-
-	print('True ATE:', ATE, 'Empirical ATE:', emp_ATE, ' Estimated ATE:', est_ATE.item())
 
 	maps = []
 	for j in range(args.n_layers):
@@ -116,11 +100,11 @@ def main(args):
 	im = ax.imshow(maps, cmap='hot', interpolation='nearest')
 	cbar = ax.figure.colorbar(im, ax=ax, shrink=1)
 	# Setting the axis tick labels
-	ax.set_xticks(np.arange(len(var_names)))
-	ax.set_yticks(np.arange(len(var_names)))
+	ax.set_xticks(np.arange(len(list(DAG.nodes))))
+	ax.set_yticks(np.arange(len(list(DAG.nodes))))
 
-	ax.set_xticklabels(var_names)
-	ax.set_yticklabels(var_names)
+	ax.set_xticklabels(list(DAG.nodes))
+	ax.set_yticklabels(list(DAG.nodes))
 
 	# Rotating the tick labels inorder to set their alignment.
 	plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
@@ -262,10 +246,10 @@ if __name__ == '__main__':
 	)
 
 	parser.add_argument(
-		"--intervention_column",
+		"--intervention_var",
 		type=int,
 		default=10,
-		help="Column index to perform an intervention and evaluate the causal effect."
+		help="List of variable names to perform an intervention and evaluate the causal effect."
 	)
 
 	args = parser.parse_args()

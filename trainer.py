@@ -10,38 +10,12 @@ def predict(model, data, device):
     data = torch.from_numpy(data).float().to(device)
     return model.forward(data)
 
-def risk_eval(model, data,  device):
-    bas = None
-    data_mod = data.copy()
-    # data_mod = data_mod[:, :-1]
-
-    preds = predict(model, data_mod, device).cpu().detach().numpy()
-    risk = ((preds - data[:, -1])**2).mean()
-    bas = balanced_accuracy_score(data[:, -1], np.round(preds))
-    return risk, bas
-
-
-def intervention_eval(model, data, int_column, device):
-
-    d0 = data.copy()
-    d1 = data.copy()
-    d0[:, int_column] = 0.0
-    d1[:, int_column] = 1.0
-
-    preds_d0 = (predict(model, d0, device)).cpu().detach().numpy()
-    preds_d1 = (predict(model, d1, device)).cpu().detach().numpy()
-
-    est_ATE = (preds_d1 - preds_d0).mean()
-
-    return est_ATE
-
 
 def get_batch(train_data, val_data, split, device, batch_size):
     data = train_data if split == 'train' else val_data
     ix = torch.randint(0, len(data), (batch_size,))
     x = data[ix]
     return x.to(device)
-
 
 
 def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter, model_save_path, optimizer, start_iter=None):

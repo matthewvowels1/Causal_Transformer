@@ -34,6 +34,33 @@ def reorder_dag(dag):
     return dag
 
 
+def get_full_ordering(DAG):
+    ''' Note that the input DAG MUST be topologically sorted <before> using this function'''
+    ordering_info = {}
+    current_level = 0
+    var_names = list(DAG.nodes)
+
+    for i, var_name in enumerate(var_names):
+
+        if i == 0:  # if first in list
+            ordering_info[var_name] = 0
+
+        else:
+            # check if any parents
+            parent_list = list(DAG.predecessors(var_name))
+
+            # if no parents ()
+            if len(parent_list) == 0:
+                ordering_info[var_name] = current_level
+
+            elif len(parent_list) >= 1:  # if some parents, find most downstream parent and add 1 to ordering
+                for parent_var in parent_list:
+                    parent_var_order = ordering_info[parent_var]
+                    ordering_info[var_name] = parent_var_order + 1
+
+    return ordering_info
+
+
 def generate_data(N, seed, dataset):
     '''
     :param N: required sample size
@@ -109,4 +136,6 @@ def generate_data(N, seed, dataset):
         nx.draw_networkx(DAGnx, pos, with_labels=True, arrows=True)
         plt.savefig('general_graph.png')
 
-    return all_data, DAGnx, var_names, var_types, Y0, Y1
+        causal_ordering = get_full_ordering(DAGnx)
+
+    return all_data, DAGnx, causal_ordering, var_types, Y0, Y1
