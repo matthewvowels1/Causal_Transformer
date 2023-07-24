@@ -6,12 +6,40 @@ TODO:
 - Change losses and predictions
 - [DONE] based on the networkX object, find topological ordering of the variables
 - [DONE] we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
+- Any variables with zero ordering can have their losses masked (can't predict something which has no parents)
 - find a solution to deal with variables which have the same topological position in the causal ordering
 - find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
 - get the model to predict all positions in the causal ordering (as in a regular transformer)
 - create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
 - automatically derive ATE estimates for all paths by iterating through the structure
 - Create testbed
+
+
+## Example logic
+
+For the following graph:
+
+I1 -> X
+I2 -> X
+X -> M -> Y -> C
+X -> Y
+
+We construct the following (lower triangular) adjacency matrix:
+
+----I1----I2----X----M----Y----C
+
+I1---0----0-----0----0----0----0  ->  N/A (masked, 0th in causal ordering)
+
+I2---0----0-----0----0----0----0  ->  N/A (masked, 0th in causal ordering)
+
+X---1----1-----0----0----0----0   ->  X  (predict X)
+
+M---0----0-----1----0----0----0   ->  M  (predict M)
+
+Y---0----0-----1----1----0----0   ->  Y  (predict Y)
+
+C---0----0-----0----0----1----0   ->  C  (predict C) 
+
 
 
 Run using ```conda activate nlp_gpt_env```

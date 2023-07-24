@@ -3,6 +3,8 @@ import torch
 from torch.nn import functional as F
 import torch.nn as nn
 from sklearn.metrics import balanced_accuracy_score
+import networkx as nx
+
 
 # adapted from example GPT code  https://github.com/karpathy/ng-video-lecture
 class Head(nn.Module):
@@ -13,7 +15,7 @@ class Head(nn.Module):
         self.value = nn.Linear(1, head_size, bias=False)
         # user a register buffer (not a module parameter) for the creation of self.dag
         # dag will determine what variables can communicate with each other
-        self.register_buffer('dag', dag)
+        self.register_buffer('dag', dag.T)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)
 
         self.wei = None
@@ -99,10 +101,23 @@ class MixedLoss(nn.Module):
 
 class CaT(nn.Module):
 
-    def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, var_names, var_types):
+    def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, ordering, var_types):
+        '''
+        :param dropout_rate:
+        :param num_heads:
+        :param head_size:
+        :param n_layers:
+        :param dag: topologically sorted networkx digraph object
+        :param device: 'cuda' or 'cpu'
+        :param ordering: a dictionary of variable names with corresponding index in causal ordering
+        :param var_types: a dictionary of variable types 'bin' (binary) 'cont' (continuous) or 'cat' (categorical)
+        '''
+
         super().__init__()
-        var_types_sorted = {k: var_types[k] for k in var_names}  # get the variable types bin/cont/cat in the 'right order'
-        self.dag = torch.tensor(dag).to(device)
+        var_types_sorted = {k: var_types[k] for k in list(dag.nodes)}  # get the variable types bin/cont/cat in the 'right order'
+        self.ordering = ordering
+        self.nxdag = dag
+        self.dag = torch.tensor(nx.to_numpy_array(dag)).to(device)  # get adjacency matrix in numpy form and torch.tensor it
         self.device = device
         self.blocks = nn.Sequential(
             *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=self.dag) for _ in range(n_layers)])

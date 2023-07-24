@@ -22,11 +22,6 @@ def main(args):
 
 	all_data, DAG, causal_ordering, var_types, Y0, Y1 = generate_data(N=args.sample_size, seed=args.seed, dataset=dataset)
 
-	DAG = nx.to_numpy_array(DAG)   # this will be the adjacency matrix
-
-	# the last variable in the DAG should be the one that needs to be predicted
-	emp_ATE = (Y1 - Y0).mean()  # ATE based off a small sample
-
 	df = pd.DataFrame(all_data)
 	df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
 
@@ -44,6 +39,7 @@ def main(args):
 	            head_size=args.head_size,
 	            num_heads=args.num_heads,
 	            dag=DAG,
+	            ordering=causal_ordering,
 	            n_layers=args.n_layers,
 	            device=device,
 	            var_types=var_types
