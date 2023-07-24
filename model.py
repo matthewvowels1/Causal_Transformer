@@ -79,25 +79,33 @@ class Block(nn.Module):
 
 
 class MixedLoss(nn.Module):
-    def __init__(self, var_types_sorted):
+    def __init__(self, var_types_sorted, causal_odering):
         super(MixedLoss, self).__init__()
+        self.causal_ordering = causal_odering
         self.var_types_sorted = var_types_sorted  # sorted types for determining which loss to use
         self.cont_loss = nn.MSELoss()  # Loss for continuous variables
         self.bin_loss = nn.BCEWithLogitsLoss()  # Loss for binary variables
         self.cat_loss = nn.CrossEntropyLoss()   # takes logits for each class as input
 
     def forward(self, pred, target):
+
         total_loss = 0
+        loss_tracking = {}
+        for i, var_name in enumerate(self.var_types_sorted.keys()):
+            var_type = self.var_types_sorted[var_name]
+            order = self.causal_ordering[var_name]
+            if order != 0:
+                if var_type == 'cont':
+                    loss = self.cont_loss(pred[:, i], target[:, i])
+                elif var_type == 'bin':
+                    loss  = self.bin_loss(pred[:, i], target[:, i])
+                elif var_type == 'cat':
+                    loss = self.cat_loss(pred[:, i].unsqueeze(0), target[:, i].long())
 
-        for i, var_type in enumerate(self.var_types_sorted.values()):
-            if var_type == 'cont':
-                total_loss += self.cont_loss(pred[:, i], target[:, i])
-            elif var_type == 'bin':
-                total_loss += self.bin_loss(pred[:, i], target[:, i])
-            elif var_type == 'cat':
-                total_loss += self.cat_loss(pred[:, i].unsqueeze(0), target[:, i].long())
+                loss_tracking[var_name] = loss.item()
+                total_loss += loss
 
-        return total_loss
+        return total_loss, loss_tracking
 
 class CaT(nn.Module):
 
@@ -122,7 +130,7 @@ class CaT(nn.Module):
         self.blocks = nn.Sequential(
             *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=self.dag) for _ in range(n_layers)])
         self.lm_head = nn.Linear(1, 1)
-        self.loss_func = MixedLoss(var_types_sorted)
+        self.loss_func = MixedLoss(var_types_sorted, ordering)
 
     def forward(self, X, targets=None):
         X = X[:, :, None]  # (B, num_vars, C=1)
@@ -133,8 +141,8 @@ class CaT(nn.Module):
         if targets == None:
             return X
         else:
-            loss = self.loss_func(X, targets)  # pull out the Y variable as the target
+            loss, loss_tracker = self.loss_func(X, targets)  # pull out the Y variable as the target
 
-            return X, loss
+            return X, loss, loss_tracker
 
 

@@ -39,6 +39,7 @@ class CausalInference():
             data[:, index] = var_val
 
         # use the ordering to work out where to start for the iterations
+        # for all variables
 
         # recursively iterate through the dag to generate results which respond to the relevant interventions
 

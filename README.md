@@ -3,10 +3,11 @@ CaT - Causal Transformer
 
 TODO:
 - [DONE] Make DAG a networkx object
-- Change losses and predictions
+- [DONE] Write function which tracks per variable loss
+- [DONE] plot per variable loss
 - [DONE] based on the networkX object, find topological ordering of the variables
 - [DONE] we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
-- Any variables with zero ordering can have their losses masked (can't predict something which has no parents)
+- [DONE] Any variables with zero ordering can have their losses masked (can't predict something which has no parents)
 - find a solution to deal with variables which have the same topological position in the causal ordering
 - find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
 - get the model to predict all positions in the causal ordering (as in a regular transformer)
@@ -20,11 +21,14 @@ TODO:
 For the following graph:
 
 I1 -> X
+
 I2 -> X
+
 X -> M -> Y -> C
+
 X -> Y
 
-We construct the following (lower triangular) adjacency matrix:
+We construct the following (lower triangular, topologically sorted) adjacency matrix:
 
 ----I1----I2----X----M----Y----C
 
@@ -47,10 +51,9 @@ Run using ```conda activate nlp_gpt_env```
 checkpoints/model_10000_0.51.ckpt
 
 python3 main.py --dataset general \
---max_iters 20000 \
---intervention_column 7  \
+--max_iters 6000 \
 --validation_fraction 0.3 \
---sample_size 5000  \
+--sample_size 2000  \
 --device cuda \
 --existing_model_path  None \
 --model_save_path checkpoints \
