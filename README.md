@@ -50,6 +50,8 @@ C---0----0-----0----0----1----0   ->  C  (predict C)
 
 
 
+
+## CLI Example
 Run using ```conda activate nlp_gpt_env```
 
 checkpoints/model_10000_0.51.ckpt
