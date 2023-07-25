@@ -8,11 +8,12 @@ import trainer
 from model import CaT
 import torch
 import matplotlib.pyplot as plt
-import networkx as nx
-
+from inference import CausalInference, find_element_in_list
 
 # for now set the intervention stuff globally here:
-intervention_nodes_vals = {'Z1':0, 'M':1}
+intervention_nodes_vals_0 = {'X':0}
+intervention_nodes_vals_1 = {'X':1}
+
 
 def main(args):
 	np.random.seed(seed=args.seed)
@@ -89,6 +90,18 @@ def main(args):
 
 
 
+
+	# check ATE (temporary code, to be generalised and integrated into testbed.py)
+	ci_module = CausalInference(model, device=device)
+	D0 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_0)
+	D1 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_1)
+	outcome_of_interest = 'Y'
+	outcome_index = find_element_in_list(list(DAG.nodes()), outcome_of_interest)
+	est_ATE = (D1[:, outcome_index] - D0[:, outcome_index]).mean()
+
+	print(est_ATE, ATE, abs(ATE-est_ATE))
+
+	# view attention maps
 	maps = []
 	for j in range(args.n_layers):
 		heads = model.blocks[j].sa.heads
@@ -112,8 +125,6 @@ def main(args):
 
 	fig.tight_layout()
 	plt.show()
-
-
 
 
 

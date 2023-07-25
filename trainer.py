@@ -2,7 +2,6 @@ import torch
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import balanced_accuracy_score
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -82,3 +81,4 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
     print('Finished training!')
 
     plot_losses(all_var_losses)
+

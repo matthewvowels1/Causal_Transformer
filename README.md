@@ -57,7 +57,7 @@ Run using ```conda activate nlp_gpt_env```
 checkpoints/model_10000_0.51.ckpt
 
 python3 main.py --dataset general \
---max_iters 6000 \
+--max_iters 10000 \
 --validation_fraction 0.3 \
 --sample_size 2000  \
 --device cuda \
