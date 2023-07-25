@@ -55,9 +55,8 @@ class CausalInference():
 
         for i, var in enumerate(list(self.dag.nodes())):
             if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
-
                 # generate predictions , updating the input dataset each time
-                preds = predict(model=self.model, data=D0, device=self.device)[:, i]
+                preds = predict(model=self.model, data=D0, device=self.device)[:, i]  # get prediction for each variable
                 if i in indices_to_update:
                     D0[:, i] = preds.detach().cpu().numpy()
 
