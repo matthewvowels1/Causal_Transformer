@@ -1,4 +1,6 @@
 
+from trainer import predict
+import networkx as nx
 
 def find_element_in_list(input_list, target_string):
     matching_indices = []
@@ -11,7 +13,7 @@ def find_element_in_list(input_list, target_string):
 
 
 class CausalInference():
-    def __init__(self, model):
+    def __init__(self, model, device):
         '''
         Using the CaT, this model iterates through the causally-constrained attention according to an intervention and some data
         :param model: causal transformer CaT pytorch model
@@ -19,33 +21,47 @@ class CausalInference():
         self.model = model
         self.dag = self.model.nxdag
         self.ordering = self.model.ordering
+        self.device = device
 
-    def forward(self, data, intervention_nodes, intervention_vals):
+    def forward(self, data, intervention_nodes_vals):
         '''
         This function iterates through the causally-constrained attention according to the dag and a desired intervention
         :param data is dataset (torch) to accompany the desired interventions (necessary for the variables which are not downstream of the intervention nodes). Assumed ordering is topological.
-        :param intervention_nodes: list of variable names as strings for intervention
-        :param intervention_vals: np array of intervention values for each intervention (assumes same ordering as intervention_nodes)
+        :param intervention_nodes_vals: dictionary of variable names as strings for intervention with corresponding intervention values
         :return: an updated dataset with new values including interventions and effects
         '''
 
-        assert len(intervention_nodes) == len(
-            intervention_vals), 'Both intervention node names and values must be provided, and their lengths must match.'
-
+        D0 = data.copy()
 
         # modify the dataset with the desired intervention values
-        for var_name, var_val in zip(intervention_nodes, intervention_vals):
+        for var_name in intervention_nodes_vals.keys():
+            val = intervention_nodes_vals[var_name]
             index = find_element_in_list(list(self.dag.nodes()), var_name)
-            data[:, index] = var_val
+            D0[:, index] = val
 
-        # use the ordering to work out where to start for the iterations
-        # for all variables
+        # find all descendants of intervention variables which are not in intervention set
+        all_descs = []
+        for var in intervention_nodes_vals.keys():
+            all_descs.append(list(nx.descendants(self.dag, var)))
+        all_descs = [item for sublist in all_descs for item in sublist]
+        vars_to_update = set(all_descs) - set(intervention_nodes_vals.keys())
+        # get corresponding column indexes
+        indices_to_update = []
+        for var_name in vars_to_update:
+            indices_to_update.append(find_element_in_list(list(self.dag.nodes()), var_name)[0])
 
-        # recursively iterate through the dag to generate results which respond to the relevant interventions
+        # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
+        min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
 
-        if intervention_vals is not None:
-            assert len(intervention_nodes) == intervention_vals, 'Number of intervention nodes must be the same as the number of intervention values.'
-        raise NotImplementedError("En route...!")
+        for i, var in enumerate(list(self.dag.nodes())):
+            if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
+
+                # generate predictions , updating the input dataset each time
+                preds = predict(model=self.model, data=D0, device=self.device)[:, i]
+                if i in indices_to_update:
+                    D0[:, i] = preds.detach().cpu().numpy()
+
+        return D0
 
 
 

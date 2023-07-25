@@ -10,6 +10,10 @@ import torch
 import matplotlib.pyplot as plt
 import networkx as nx
 
+
+# for now set the intervention stuff globally here:
+intervention_nodes_vals = {'Z1':0, 'M':1}
+
 def main(args):
 	np.random.seed(seed=args.seed)
 	torch.manual_seed(args.seed)
