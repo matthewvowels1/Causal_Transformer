@@ -8,10 +8,10 @@ TODO:
 - [DONE] based on the networkX object, find topological ordering of the variables
 - [DONE] we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
 - [DONE] Any variables with zero ordering can have their losses masked (can't predict something which has no parents)
-- find a solution to deal with variables which have the same topological position in the causal ordering
-- find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
-- get the model to predict all positions in the causal ordering (as in a regular transformer)
-- create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
+- [DONE] find a solution to deal with variables which have the same topological position in the causal ordering
+- [DONE] find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
+- [DONE] get the model to predict all positions in the causal ordering (as in a regular transformer)
+- [DONE] create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
 - automatically derive ATE estimates for all paths by iterating through the structure
 - Create testbed
 
