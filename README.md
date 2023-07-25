@@ -12,8 +12,12 @@ TODO:
 - [DONE] find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
 - [DONE] get the model to predict all positions in the causal ordering (as in a regular transformer)
 - [DONE] create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
-- automatically derive ATE estimates for all paths by iterating through the structure
 - Create testbed
+  - compute all causal effects for 'general' dataset in datasets.py 
+  - create a function for computing ATEs using CaT 
+  - check that they can be estimated reasonably well
+  - find application tasks / benchmarks (possibly robotics)
+  - run test suite and report results
 
 
 ## Example logic
