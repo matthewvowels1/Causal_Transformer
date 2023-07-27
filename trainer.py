@@ -6,13 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datasets import generate_data
 import warnings
-from inference import CausalInference, find_element_in_list
+from inference import CausalInference, find_element_in_list, predict
 from model import CaT
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score
 warnings.filterwarnings("ignore")
 
-def predict(model, data, device):
-    data = torch.from_numpy(data).float().to(device)
-    return model.forward(data)
 
 
 def get_batch(train_data, val_data, split, device, batch_size):
@@ -209,13 +208,21 @@ def objective(trial, args):
     est_ATE = (D1[:, outcome_index] - D0[:, outcome_index]).mean()
 
     print('ATE results', est_ATE, ATE, abs(ATE-est_ATE))
-    from sklearn.metrics import r2_score
     r2x = r2_score(all_data[:, 0], D[:, 0].detach().cpu().numpy())
     r2x1 = r2_score(all_data[:, 1], D[:, 1].detach().cpu().numpy())
     r2y = r2_score(all_data[:, 2], D[:, 2].detach().cpu().numpy())
-    print('R2:', r2x)
-    print('R2:', r2x1)
-    print('R2:', r2y)
+    print('R2X:', r2x)
+    print('R2X1:', r2x1)
+    print('R2Y:', r2y)
+
+
+    rdf = RandomForestRegressor()
+    rdf.fit(train_data[:, :2], train_data[:, 2])
+    preds = rdf.predict(val_data)
+
+    print('sanity check R2 with RDF:')
+    r2y_rdf = r2_score(val_data[:, 2], preds)
+    print('R2Y:', r2y_rdf)
 
     return r2y
 

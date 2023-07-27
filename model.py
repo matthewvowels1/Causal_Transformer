@@ -27,7 +27,7 @@ class Head(nn.Module):
         self.dag_orig = dag
 
         matrix = torch.ones_like(self.dag_orig)
-        self.dag_orig = torch.tril(matrix, diagonal=-1)   #if triu.diagonal=1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
+        self.dag_orig = torch.tril(matrix, diagonal=-1)   #if triu.diagonal=1 or tril.diagonal=-1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
 
         self.register_buffer('dag_mod', self.dag_orig)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)

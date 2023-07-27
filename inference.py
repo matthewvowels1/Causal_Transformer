@@ -1,6 +1,12 @@
 
 
 import networkx as nx
+import torch
+
+
+def predict(model, data, device):
+    data = torch.from_numpy(data).float().to(device)
+    return model.forward(data)
 
 def find_element_in_list(input_list, target_string):
     matching_indices = []
