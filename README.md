@@ -12,6 +12,10 @@ TODO:
 - [DONE] find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
 - [DONE] get the model to predict all positions in the causal ordering (as in a regular transformer)
 - [DONE] create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
+- [DONE] create a very simple dataset for validation
+- [DONE] turn into optuna objective
+- [DONE] if each row is independent, then can we shuffle the variable order and construct an adjacency matrix based on the parents of each variable in each sample in each batch?
+- [DONE] evaluate R2 to check convergence (not for final code)
 - Create testbed
   - compute all causal effects for 'general' dataset in datasets.py 
   - create a function for computing ATEs using CaT 
@@ -40,13 +44,13 @@ I1---0----0-----0----0----0----0  ->  N/A (masked, 0th in causal ordering)
 
 I2---0----0-----0----0----0----0  ->  N/A (masked, 0th in causal ordering)
 
-X---1----1-----0----0----0----0   ->  X  (predict X)
+X ---1----1-----0----0----0----0   ->  X  (predict X)
 
-M---0----0-----1----0----0----0   ->  M  (predict M)
+M ---0----0-----1----0----0----0   ->  M  (predict M)
 
-Y---0----0-----1----1----0----0   ->  Y  (predict Y)
+Y ---0----0-----1----1----0----0   ->  Y  (predict Y)
 
-C---0----0-----0----0----1----0   ->  C  (predict C) 
+C ---0----0-----0----0----1----0   ->  C  (predict C) 
 
 
 
@@ -56,21 +60,21 @@ Run using ```conda activate nlp_gpt_env```
 
 checkpoints/model_10000_0.51.ckpt
 
-python3 main.py --dataset general \
---max_iters 10000 \
+python3 main.py --dataset simple_test \
+--max_iters 20000 \
 --validation_fraction 0.3 \
---sample_size 2000  \
+--sample_size 5000  \
 --device cuda \
 --existing_model_path  None \
 --model_save_path checkpoints \
 --data_path data \
---batch_size 32 \
+--batch_size 1 \
 --eval_interval 500 \
 --eval_iters 100 \
---learning_rate 1e-4 \
+--learning_rate 1e-3 \
 --save_iter 2000 \
 --num_heads 4 \
---head_size 4 \
---dropout_rate 0.3 \
---n_layers 4 
+--head_size 1 \
+--dropout_rate 0.2 \
+--n_layers 2
 
