@@ -61,7 +61,7 @@ Run using ```conda activate nlp_gpt_env```
 checkpoints/model_10000_0.51.ckpt
 
 python3 main.py --dataset simple_test \
---max_iters 20000 \
+--max_iters 30000 \
 --validation_fraction 0.3 \
 --sample_size 5000  \
 --device cuda \
@@ -71,10 +71,15 @@ python3 main.py --dataset simple_test \
 --batch_size 1 \
 --eval_interval 500 \
 --eval_iters 100 \
---learning_rate 1e-3 \
---save_iter 2000 \
---num_heads 4 \
+--learning_rate 1e-4 \
+--checkpointing_on 0 \
+--save_iter 100000 \
+--num_heads 10 \
 --head_size 1 \
---dropout_rate 0.2 \
---n_layers 2
+--dropout_rate 0.45 \
+--n_layers 2 \
+--run_optuna 1 \
+--optuna_num_trials 50 \
+--score_interaction_type 1 \
+--seed 2
 

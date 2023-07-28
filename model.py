@@ -16,8 +16,9 @@ def adjacency_mod(adjacency_matrix, causal_ordering):  # TODO: remove if functio
 
 # adapted from example GPT code  https://github.com/karpathy/ng-video-lecture
 class Head(nn.Module):
-    def __init__(self, head_size, dropout_rate, dag):
+    def __init__(self, head_size, dropout_rate, dag, interaction_type):
         super().__init__()
+        self.interaction_type = interaction_type
         self.key = nn.Linear(1, head_size, bias=False)
         self.query = nn.Linear(1, head_size, bias=False)
         self.value = nn.Linear(1, head_size, bias=False)
@@ -27,10 +28,11 @@ class Head(nn.Module):
         self.dag_orig = dag
 
         matrix = torch.ones_like(self.dag_orig)
-        self.dag_orig = torch.tril(matrix, diagonal=-1)   #if triu.diagonal=1 or tril.diagonal=-1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
+        self.dag_orig = torch.tril(matrix)  #, diagonal=-1)   #if triu.diagonal=1 or tril.diagonal=-1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
 
         self.register_buffer('dag_mod', self.dag_orig)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)
+        self.act = nn.LeakyReLU()
 
         self.att_wei = None
     def forward(self, X):
@@ -39,7 +41,14 @@ class Head(nn.Module):
         Q = self.query(X)  # B, T, hs
         V = self.value(X)  # B, T, hs
         B, T, HS = Q .shape
-        QK = (Q * K)  # elementwise multiplication  (bs, dims, 1), this is not the regular attention computation
+        if self.interaction_type == 0:
+            QK = torch.add(Q, K)
+        elif self.interaction_type == 1:
+            QK = (Q * K)
+        elif self.interaction_type == 2:
+            QK = Q
+
+        # QK = (Q * K)  # elementwise multiplication  (bs, dims, 1), this is not the regular attention computation
         self.att_wei = QK.repeat(1, 1, T).transpose(-2, -1)  # stack horizontally (bs, dims, dims)
         self.att_wei = self.att_wei.masked_fill(self.dag_mod == 0, float('-inf'))
         self.att_wei = F.softmax(self.att_wei, dim=-1)
@@ -48,20 +57,21 @@ class Head(nn.Module):
         self.att_wei = torch.where(nan_mask, torch.zeros_like(self.att_wei), self.att_wei) # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
         self.att_wei = self.dropout(self.att_wei)
         out = self.att_wei @ V
-        return out
+        return self.act(out)
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, num_heads, head_size, dropout_rate, dag):
+    def __init__(self, num_heads, head_size, dropout_rate, dag, interaction_type):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size=head_size, dropout_rate=dropout_rate, dag=dag) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size=head_size, dropout_rate=dropout_rate, dag=dag, interaction_type=interaction_type) for _ in range(num_heads)])
         self.projection = nn.Linear(int(head_size*num_heads), 1)
         self.dropout = nn.Dropout(dropout_rate)
+        self.act = nn.LeakyReLU()
 
     def forward(self, X):
         out = torch.cat([h(X) for h in self.heads], dim=-1)
         out = self.dropout(self.projection(out))
-        return out
+        return self.act(out)
 
 
 class FF(nn.Module):
@@ -81,9 +91,9 @@ class FF(nn.Module):
 
 class Block(nn.Module):
 
-    def __init__(self, n_embed, num_heads, head_size,  dropout_rate, dag):
+    def __init__(self, n_embed, num_heads, head_size,  dropout_rate, dag, interaction_type):
         super().__init__()
-        self.mha = MultiHeadAttention(num_heads, head_size, dropout_rate, dag)
+        self.mha = MultiHeadAttention(num_heads, head_size, dropout_rate, dag, interaction_type)
         self.ff = FF(n_embed, dropout_rate)
 
     def forward(self, X):
@@ -101,14 +111,15 @@ class MixedLoss(nn.Module):
         self.bin_loss = nn.BCEWithLogitsLoss()  # Loss for binary variables
         self.cat_loss = nn.CrossEntropyLoss()   # takes logits for each class as input
 
-    def forward(self, pred, target):
+    def forward(self, pred, target, shuffle_ordering):
 
         total_loss = 0
         loss_tracking = {}
-        for i, var_name in enumerate(self.var_types_sorted.keys()):
+        sorted_vars = [list(self.var_types_sorted.keys())[i] for i in shuffle_ordering]
+        for i, var_name in enumerate(sorted_vars):
             var_type = self.var_types_sorted[var_name]
             order = self.causal_ordering[var_name]
-            # if order != 0:  # TODO: include condition if needed (up to function return)
+            # if order != 0:  # don't generate a loss for predicting stuff with no parents
             if var_type == 'cont':
                 loss = self.cont_loss(pred[:, i], target[:, i])
             elif var_type == 'bin':
@@ -125,16 +136,19 @@ class MixedLoss(nn.Module):
 def shuffler(X, targets, dag):
     # shuffles the order of X, targets, and adjacency matrix for a batch
     shuffle_ordering = np.random.permutation(X.shape[1])
-    return X[:, shuffle_ordering], dag[shuffle_ordering, :], targets[:, shuffle_ordering]
+    shuffle_ordering = np.arange(0, X.shape[1])
+    return X[:, shuffle_ordering], dag[shuffle_ordering, :], targets[:, shuffle_ordering], shuffle_ordering
 
 class CaT(nn.Module):
 
-    def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, ordering, var_types):
+    def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, ordering, var_types,
+                 interaction_type=0):
         '''
         :param dropout_rate:
         :param num_heads:
         :param head_size:
         :param n_layers:
+        :param interaction_type: type of interaction in attention layer
         :param dag: topologically sorted networkx digraph object
         :param device: 'cuda' or 'cpu'
         :param ordering: a dictionary of variable names with corresponding index in causal ordering
@@ -144,13 +158,13 @@ class CaT(nn.Module):
         super().__init__()
         var_types_sorted = {k: var_types[k] for k in list(dag.nodes)}  # get the variable types bin/cont/cat in the 'right order'
         self.n_layers = n_layers
-        self.num_heads =num_heads
+        self.num_heads = num_heads
         self.ordering = ordering
         self.nxdag = dag
         dag = torch.tensor(nx.to_numpy_array(dag)).to(device).T  # get adjacency matrix and add diagonals (TODO: remove adj_mod if not needed)
         self.device = device
         self.blocks = nn.Sequential(
-            *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=dag) for _ in range(n_layers)])
+            *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=dag, interaction_type=interaction_type) for _ in range(n_layers)])
         self.lm_head = nn.Linear(1, 1)
         self.loss_func = MixedLoss(var_types_sorted, ordering)
 
@@ -159,7 +173,7 @@ class CaT(nn.Module):
 
         if targets is not None:
             orig_dag = self.blocks[0].mha.heads[0].dag_orig
-            X, shuffled_dag, targets = shuffler(X, targets, orig_dag)
+            X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, orig_dag)
             for i in range(self.n_layers):
                 for j in range(self.num_heads):
                     self.blocks[i].mha.heads[j].dag_mod = shuffled_dag  # changes the ordering of X, targets, and dag on a per batch basis
@@ -176,7 +190,7 @@ class CaT(nn.Module):
         if targets == None:
             return X
         elif targets is not None:
-            loss, loss_tracker = self.loss_func(X, targets)  # pull out the Y variable as the target
+            loss, loss_tracker = self.loss_func(X, targets, shuffle_ordering)  # pull out the Y variable as the target
             return X, loss, loss_tracker
 
 

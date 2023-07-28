@@ -133,7 +133,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=1,
         help="Random seed."
     )
 
@@ -151,25 +151,57 @@ if __name__ == '__main__':
         help="List of variable names to perform an intervention and evaluate the causal effect."
     )
 
+    parser.add_argument(
+        "--run_optuna",
+        type=int,
+        default=0,
+        help="Run hyperparameter search = 1 or not = 0."
+    )
+
+    parser.add_argument(
+        "--optuna_num_trials",
+        type=int,
+        default=60,
+        help="Number of optuna hyperparameter search trials."
+    )
+    parser.add_argument(
+        "--checkpointing_on",
+        type=int,
+        default=0,
+        help="Whether to save model checkpoints every save_iter."
+    )
+
+    parser.add_argument(
+        "--score_interaction_type",
+        type=int,
+        default=0,
+        help="Type of interaction used for Q and K for the attention scores. 0 = add Q+K, 1 = mulitiply Q*K elementwise, 2 = pass-thru "
+    )
+
     args = parser.parse_args()
 
-    study = optuna.create_study(direction="maximize")
-    study.optimize(lambda trial: objective(trial, args), n_trials=20)
-    pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
-    complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
+    if args.run_optuna:
+        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=args.seed))
+        study.optimize(lambda trial: objective(trial, args), n_trials=args.optuna_num_trials)
+        pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
+        complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
 
-    print("Study statistics: ")
-    print("  Number of finished trials: ", len(study.trials))
-    print("  Number of pruned trials: ", len(pruned_trials))
-    print("  Number of complete trials: ", len(complete_trials))
+        print("Study statistics: ")
+        print("  Number of finished trials: ", len(study.trials))
+        print("  Number of pruned trials: ", len(pruned_trials))
+        print("  Number of complete trials: ", len(complete_trials))
 
-    print("Best trial:")
-    trial = study.best_trial
+        print("Best trial:")
+        trial = study.best_trial
 
-    print("  Value: ", trial.value)
+        print("  Value: ", trial.value)
 
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print("    {}: {}".format(key, value))
+        print("  Params: ")
+        for key, value in trial.params.items():
+            print("    {}: {}".format(key, value))
+
+    else:
+        objective(trial=None, args=args)
+
 
 

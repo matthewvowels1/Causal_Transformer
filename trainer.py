@@ -34,7 +34,8 @@ def plot_losses(loss_dict):
     plt.close()
 
 
-def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter, model_save_path, optimizer, start_iter=None):
+def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter,
+          model_save_path, optimizer, start_iter=None, checkpointing_on=0):
     train_data, val_data = torch.from_numpy(train_data).float(),  torch.from_numpy(val_data).float()
 
     if start_iter == None:
@@ -73,10 +74,10 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
                     losses[k] = loss.item()
                 eval_loss[split] = losses.mean()
             model.train()
-            print(f"step {iter_}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
+            print(f"step {iter_} of {max_iters}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
 
 
-        if (iter_ > 1 ) and (iter_ != start_iter) and ((iter_ + 1) % save_iter == 0):
+        if (iter_ > 1 ) and (iter_ != start_iter) and ((iter_ + 1) % save_iter == 0) and (checkpointing_on==1):
             print('Saving model checkpoint.')
             torch.save({
                 'iteration': iter_,
@@ -115,19 +116,32 @@ def objective(trial, args):
     existing_model_path = args.existing_model_path
     model_save_path = args.model_save_path
 
-    # learning_rate = args.learning_rate
-    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
-    # max_iters = args.max_iters
-    max_iters = trial.suggest_int('max_iters', 1000, 20000)
-    # num_heads = args.num_heads
-    num_heads  = trial.suggest_int('num_heads', 2, 10)
-    # n_layers = args.n_layers
-    n_layers = trial.suggest_int('n_layers', 2, 6)
-    # dropout_rate = args.dropout_rate
-    dropout_rate = trial.suggest_float('dropout_rate', 0.0, 0.5)
+    if args.run_optuna:
+        # optuna parameters
+        learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
+        max_iters = trial.suggest_int('max_iters', 5000, 40000)
+        num_heads = trial.suggest_int('num_heads', 2, 4)
+        n_layers = trial.suggest_int('n_layers', 2, 4)
+        dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
+        interaction_type = trial.suggest_int('interaction_type', 0, 2)
+        optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW", "RMSprop", "SGD"])
 
-    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW", "RMSprop", "SGD"])
+        print('learning rate', learning_rate,
+		        'max iters', max_iters,
+		        'num_heads', num_heads,
+		        'n_layers', n_layers,
+		        'dropout_rate', dropout_rate,
+		        'interaction_type', interaction_type,
+		        'optimizer', optimizer_name)
 
+    else:
+        learning_rate = args.learning_rate
+        max_iters = args.max_iters
+        num_heads = args.num_heads
+        n_layers = args.n_layers
+        dropout_rate = args.dropout_rate
+        optimizer_name = "Adam"
+        interaction_type = args.score_interaction_type
 
     _, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=seed, dataset=dataset, standardize=standardize)
     ATE = (Y1 - Y0).mean()  # ATE based off a large sample
@@ -154,7 +168,8 @@ def objective(trial, args):
                 ordering=causal_ordering,
                 n_layers=n_layers,
                 device=device,
-                var_types=var_types
+                var_types=var_types,
+                interaction_type=interaction_type
                 ).to(device)
 
     # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -172,7 +187,8 @@ def objective(trial, args):
                       batch_size=batch_size,
                       save_iter=save_iter,
                       model_save_path=model_save_path,
-                      optimizer=optimizer
+                      optimizer=optimizer,
+                      checkpointing_on=args.checkpointing_on
                       )
 
     else:  # if existing checkpoint file is given, compare iteration against max_iters and finish training if necessary
@@ -193,7 +209,8 @@ def objective(trial, args):
                           batch_size=batch_size,
                           save_iter=save_iter,
                           model_save_path=model_save_path,
-                          optimizer=optimizer, start_iter=checkpoint_iter
+                          optimizer=optimizer, start_iter=checkpoint_iter,
+                          checkpointing_on=args.checkpointing_on
                           )
 
 
@@ -218,7 +235,7 @@ def objective(trial, args):
 
     rdf = RandomForestRegressor()
     rdf.fit(train_data[:, :2], train_data[:, 2])
-    preds = rdf.predict(val_data)
+    preds = rdf.predict(val_data[:, :2])
 
     print('sanity check R2 with RDF:')
     r2y_rdf = r2_score(val_data[:, 2], preds)
