@@ -178,6 +178,19 @@ if __name__ == '__main__':
         help="Type of interaction used for Q and K for the attention scores. 0 = add Q+K, 1 = mulitiply Q*K elementwise, 2 = pass-thru "
     )
 
+    parser.add_argument(
+        "--shuffling",
+        type=int,
+        default=0,
+        help="Whether to shuffle the ordering of variables and the dag, 0 = no, 1 = yes"
+    )
+
+    parser.add_argument(
+        "--dag_type",
+        type=int,
+        default=0,
+        help="Whether to use the lower-triangular with diagonal (=0), the lower-triangular without diagonal (=1) or causal adjacency matrix (=2)"
+    )
     args = parser.parse_args()
 
     if args.run_optuna:

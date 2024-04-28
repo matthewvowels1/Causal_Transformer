@@ -99,6 +99,8 @@ intervention_nodes_vals_1 = {'X': 1}
 
 
 def objective(trial, args):
+    dag_type = args.dag_type
+    shuffling = args.shuffling
     seed = args.seed
     standardize = args.standardize
     sample_size = args.sample_size
@@ -115,24 +117,25 @@ def objective(trial, args):
     fn = args.data_path
     existing_model_path = args.existing_model_path
     model_save_path = args.model_save_path
+    checkpointing_on = args.checkpointing_on
 
     if args.run_optuna:
         # optuna parameters
         learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
-        max_iters = trial.suggest_int('max_iters', 5000, 40000)
-        num_heads = trial.suggest_int('num_heads', 2, 4)
-        n_layers = trial.suggest_int('n_layers', 2, 4)
+        max_iters = trial.suggest_int('max_iters', 500, 40000)
+        num_heads = trial.suggest_int('num_heads', 2, 2)
+        n_layers = trial.suggest_int('n_layers', 2, 2)
         dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
         interaction_type = trial.suggest_int('interaction_type', 0, 2)
         optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW", "RMSprop", "SGD"])
 
         print('learning rate', learning_rate,
-		        'max iters', max_iters,
-		        'num_heads', num_heads,
-		        'n_layers', n_layers,
-		        'dropout_rate', dropout_rate,
-		        'interaction_type', interaction_type,
-		        'optimizer', optimizer_name)
+                'max iters', max_iters,
+                'num_heads', num_heads,
+                'n_layers', n_layers,
+                'dropout_rate', dropout_rate,
+                'interaction_type', interaction_type,
+                'optimizer', optimizer_name)
 
     else:
         learning_rate = args.learning_rate
@@ -169,7 +172,9 @@ def objective(trial, args):
                 n_layers=n_layers,
                 device=device,
                 var_types=var_types,
-                interaction_type=interaction_type
+                interaction_type=interaction_type,
+                shuffling=shuffling,
+                dag_type=dag_type
                 ).to(device)
 
     # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -217,7 +222,7 @@ def objective(trial, args):
     ######### check ATE (temporary code, to be generalised and integrated into testbed.py)########################
 
     ci_module = CausalInference(model, device=device)
-    D = ci_module.forward(data=all_data, intervention_nodes_vals=None)
+    D_val = ci_module.forward(data=val_data, intervention_nodes_vals=None)
     D0 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_0)
     D1 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_1)
     outcome_of_interest = 'Y'
@@ -225,9 +230,9 @@ def objective(trial, args):
     est_ATE = (D1[:, outcome_index] - D0[:, outcome_index]).mean()
 
     print('ATE results', est_ATE, ATE, abs(ATE-est_ATE))
-    r2x = r2_score(all_data[:, 0], D[:, 0].detach().cpu().numpy())
-    r2x1 = r2_score(all_data[:, 1], D[:, 1].detach().cpu().numpy())
-    r2y = r2_score(all_data[:, 2], D[:, 2].detach().cpu().numpy())
+    r2x = r2_score(val_data[:, 0], D_val[:, 0].detach().cpu().numpy())
+    r2x1 = r2_score(val_data[:, 1], D_val[:, 1].detach().cpu().numpy())
+    r2y = r2_score(val_data[:, 2], D_val[:, 2].detach().cpu().numpy())
     print('R2X:', r2x)
     print('R2X1:', r2x1)
     print('R2Y:', r2y)

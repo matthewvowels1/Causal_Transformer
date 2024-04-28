@@ -16,6 +16,7 @@ TODO:
 - [DONE] turn into optuna objective
 - [DONE] if each row is independent, then can we shuffle the variable order and construct an adjacency matrix based on the parents of each variable in each sample in each batch?
 - [DONE] evaluate R2 to check convergence (not for final code)
+- IDEA: Train with full lower triangular + diagonal in 1st stage of training (to help gradient flow), then drop out links
 - Create testbed
   - compute all causal effects for 'general' dataset in datasets.py 
   - create a function for computing ATEs using CaT 
@@ -81,5 +82,7 @@ python3 main.py --dataset simple_test \
 --run_optuna 1 \
 --optuna_num_trials 50 \
 --score_interaction_type 1 \
+--shuffling 0 \
+--dag_type 2 \
 --seed 2
 

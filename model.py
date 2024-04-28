@@ -16,7 +16,7 @@ def adjacency_mod(adjacency_matrix, causal_ordering):  # TODO: remove if functio
 
 # adapted from example GPT code  https://github.com/karpathy/ng-video-lecture
 class Head(nn.Module):
-    def __init__(self, head_size, dropout_rate, dag, interaction_type):
+    def __init__(self, head_size, dropout_rate, dag, interaction_type, dag_type):
         super().__init__()
         self.interaction_type = interaction_type
         self.key = nn.Linear(1, head_size, bias=False)
@@ -27,8 +27,10 @@ class Head(nn.Module):
 
         self.dag_orig = dag
 
-        matrix = torch.ones_like(self.dag_orig)
-        self.dag_orig = torch.tril(matrix)  #, diagonal=-1)   #if triu.diagonal=1 or tril.diagonal=-1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
+        diagonal = -1 if dag_type == 1 else 0
+        if dag_type != 2:
+            matrix = torch.ones_like(self.dag_orig)
+            self.dag_orig = torch.tril(matrix, diagonal=diagonal)  #, diagonal=-1)   #if triu.diagonal=1 or tril.diagonal=-1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
 
         self.register_buffer('dag_mod', self.dag_orig)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)
@@ -61,9 +63,9 @@ class Head(nn.Module):
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, num_heads, head_size, dropout_rate, dag, interaction_type):
+    def __init__(self, num_heads, head_size, dropout_rate, dag, interaction_type, dag_type):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size=head_size, dropout_rate=dropout_rate, dag=dag, interaction_type=interaction_type) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size=head_size, dropout_rate=dropout_rate, dag=dag, dag_type=dag_type, interaction_type=interaction_type) for _ in range(num_heads)])
         self.projection = nn.Linear(int(head_size*num_heads), 1)
         self.dropout = nn.Dropout(dropout_rate)
         self.act = nn.LeakyReLU()
@@ -91,9 +93,9 @@ class FF(nn.Module):
 
 class Block(nn.Module):
 
-    def __init__(self, n_embed, num_heads, head_size,  dropout_rate, dag, interaction_type):
+    def __init__(self, n_embed, num_heads, head_size,  dropout_rate, dag, interaction_type, dag_type):
         super().__init__()
-        self.mha = MultiHeadAttention(num_heads, head_size, dropout_rate, dag, interaction_type)
+        self.mha = MultiHeadAttention(num_heads, head_size, dropout_rate, dag, interaction_type, dag_type=dag_type)
         self.ff = FF(n_embed, dropout_rate)
 
     def forward(self, X):
@@ -133,17 +135,20 @@ class MixedLoss(nn.Module):
         return total_loss, loss_tracking
 
 
-def shuffler(X, targets, dag):
+def shuffler(X, targets, dag, shuffling=False):
     # shuffles the order of X, targets, and adjacency matrix for a batch
-    shuffle_ordering = np.random.permutation(X.shape[1])
-    shuffle_ordering = np.arange(0, X.shape[1])
+    if shuffling:
+        shuffle_ordering = np.random.permutation(X.shape[1])
+    else:
+        shuffle_ordering = np.arange(0, X.shape[1])
     return X[:, shuffle_ordering], dag[shuffle_ordering, :], targets[:, shuffle_ordering], shuffle_ordering
 
 class CaT(nn.Module):
 
     def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, ordering, var_types,
-                 interaction_type=0):
+                 interaction_type=0, shuffling=0, dag_type=0):
         '''
+        :param dag_type: Whether to use the lower-triangular with diagonal (=0), the lower-triangular without diagonal (=1) or causal adjacency matrix (=2)
         :param dropout_rate:
         :param num_heads:
         :param head_size:
@@ -164,16 +169,17 @@ class CaT(nn.Module):
         dag = torch.tensor(nx.to_numpy_array(dag)).to(device).T  # get adjacency matrix and add diagonals (TODO: remove adj_mod if not needed)
         self.device = device
         self.blocks = nn.Sequential(
-            *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=dag, interaction_type=interaction_type) for _ in range(n_layers)])
+            *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=dag, dag_type=dag_type, interaction_type=interaction_type) for _ in range(n_layers)])
         self.lm_head = nn.Linear(1, 1)
         self.loss_func = MixedLoss(var_types_sorted, ordering)
+        self.shuffling = shuffling
 
     def forward(self, X, targets=None):
         X = X[:, :, None]  # (B, num_vars, C=1)
 
         if targets is not None:
             orig_dag = self.blocks[0].mha.heads[0].dag_orig
-            X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, orig_dag)
+            X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, orig_dag, shuffling=self.shuffling)
             for i in range(self.n_layers):
                 for j in range(self.num_heads):
                     self.blocks[i].mha.heads[j].dag_mod = shuffled_dag  # changes the ordering of X, targets, and dag on a per batch basis

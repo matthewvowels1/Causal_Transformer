@@ -170,6 +170,21 @@ def generate_data(N, seed, dataset, standardize=1):
         Y1 = 0.6 - 0.5 * X2  # + uy
         Y0 = -0.5 * X2   # + uy
 
+        X_1 = np.full((len(Y1)//2, 1), 1)  # TODO: very simple test dataset  (to be removed)
+        X2_1 = np.full((len(Y1)//2, 1), 2)
+        Y_1 = np.full((len(Y1)//2, 1), 3)
+
+        X_2 = np.full((len(Y1) // 2, 1), 2)  # TODO: very simple test dataset  (to be removed)
+        X2_2 = np.full((len(Y1) // 2, 1), 4)
+        Y_2 = np.full((len(Y1) // 2, 1), 6)
+
+        X = np.concatenate((X_1, X_2), 0)
+        X2 = np.concatenate((X2_1, X2_2), 0)
+        Y = np.concatenate((Y_1, Y_2), 0)
+
+
+
+
         all_data_dict = {'X': X, 'X2': X2, 'Y': Y}
 
         # types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
