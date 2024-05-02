@@ -35,7 +35,7 @@ def plot_losses(loss_dict):
 
 
 def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter,
-          model_save_path, optimizer, start_iter=None, checkpointing_on=0):
+          model_save_path, optimizer, start_iter=None, checkpointing_on=0, shuffling=False):
     train_data, val_data = torch.from_numpy(train_data).float(),  torch.from_numpy(val_data).float()
 
     if start_iter == None:
@@ -48,7 +48,7 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
 
         xb = get_batch(train_data=train_data, val_data=val_data, split='train', device=device, batch_size=batch_size)
         xb_mod = torch.clone(xb.detach())
-        X, loss, loss_dict = model(X=xb, targets=xb_mod)
+        X, loss, loss_dict = model(X=xb, targets=xb_mod, shuffling=shuffling)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -99,13 +99,13 @@ intervention_nodes_vals_1 = {'X': 1}
 
 
 def objective(trial, args):
-    dag_type = args.dag_type
     shuffling = args.shuffling
     seed = args.seed
     standardize = args.standardize
     sample_size = args.sample_size
     batch_size = args.batch_size
     head_size = args.head_size
+    ff_n_embed = args.ff_n_embed
     save_iter = args.save_iter
     eval_interval = args.eval_interval
     eval_iters = args.eval_iters
@@ -144,16 +144,16 @@ def objective(trial, args):
         n_layers = args.n_layers
         dropout_rate = args.dropout_rate
         optimizer_name = "Adam"
-        interaction_type = args.score_interaction_type
 
     _, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=seed, dataset=dataset, standardize=standardize)
     ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
     all_data, DAG, causal_ordering, var_types, Y0, Y1 = generate_data(N=sample_size, seed=seed, dataset=dataset)
 
-    df = pd.DataFrame(all_data)
-    df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
+    # df = pd.DataFrame(all_data)
+    # df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
 
+    input_dim = all_data.shape[2]
     indices = np.arange(0, len(all_data))
     np.random.shuffle(indices)
 
@@ -164,17 +164,17 @@ def objective(trial, args):
 
     print('Training data size:', train_data.shape, ' Validation data size:', val_data.shape)
 
-    model = CaT(dropout_rate=dropout_rate,
+
+    model = CaT(input_dim=input_dim,
+                dropout_rate=dropout_rate,
                 head_size=head_size,
                 num_heads=num_heads,
+                ff_n_embed=ff_n_embed,
                 dag=DAG,
-                ordering=causal_ordering,
+                causal_ordering=causal_ordering,
                 n_layers=n_layers,
                 device=device,
-                var_types=var_types,
-                interaction_type=interaction_type,
-                shuffling=shuffling,
-                dag_type=dag_type
+                var_types_sorted=var_types,
                 ).to(device)
 
     # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -193,7 +193,8 @@ def objective(trial, args):
                       save_iter=save_iter,
                       model_save_path=model_save_path,
                       optimizer=optimizer,
-                      checkpointing_on=args.checkpointing_on
+                      checkpointing_on=checkpointing_on,
+                      shuffling=shuffling
                       )
 
     else:  # if existing checkpoint file is given, compare iteration against max_iters and finish training if necessary
@@ -204,49 +205,50 @@ def objective(trial, args):
         checkpoint_iter = checkpoint['iteration']
 
         if checkpoint_iter != max_iters:
-            train(train_data=train_data,
-                          eval_iters=eval_iters,
-                          val_data=val_data,
-                          max_iters=max_iters,
-                          eval_interval=eval_interval,
-                          device=device,
-                          model=model,
-                          batch_size=batch_size,
-                          save_iter=save_iter,
-                          model_save_path=model_save_path,
-                          optimizer=optimizer, start_iter=checkpoint_iter,
-                          checkpointing_on=args.checkpointing_on
+            train(rain_data=train_data,
+                      eval_iters=eval_iters,
+                      val_data=val_data,
+                      max_iters=max_iters,
+                      eval_interval=eval_interval,
+                      device=device,
+                      model=model,
+                      batch_size=batch_size,
+                      save_iter=save_iter,
+                      model_save_path=model_save_path,
+                      optimizer=optimizer,
+                      checkpointing_on=checkpointing_on,
+                      shuffling=shuffling
                           )
 
 
     ######### check ATE (temporary code, to be generalised and integrated into testbed.py)########################
 
-    ci_module = CausalInference(model, device=device)
-    D_val = ci_module.forward(data=val_data, intervention_nodes_vals=None)
-    D0 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_0)
-    D1 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_1)
-    outcome_of_interest = 'Y'
-    outcome_index = find_element_in_list(list(DAG.nodes()), outcome_of_interest)
-    est_ATE = (D1[:, outcome_index] - D0[:, outcome_index]).mean()
-
-    print('ATE results', est_ATE, ATE, abs(ATE-est_ATE))
-    r2x = r2_score(val_data[:, 0], D_val[:, 0].detach().cpu().numpy())
-    r2x1 = r2_score(val_data[:, 1], D_val[:, 1].detach().cpu().numpy())
-    r2y = r2_score(val_data[:, 2], D_val[:, 2].detach().cpu().numpy())
-    print('R2X:', r2x)
-    print('R2X1:', r2x1)
-    print('R2Y:', r2y)
-
-
-    rdf = RandomForestRegressor()
-    rdf.fit(train_data[:, :2], train_data[:, 2])
-    preds = rdf.predict(val_data[:, :2])
-
-    print('sanity check R2 with RDF:')
-    r2y_rdf = r2_score(val_data[:, 2], preds)
-    print('R2Y:', r2y_rdf)
-
-    return r2y
+    # ci_module = CausalInference(model, device=device)
+    # D_val = ci_module.forward(data=val_data, intervention_nodes_vals=None)
+    # D0 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_0)
+    # D1 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_1)
+    # outcome_of_interest = 'Y'
+    # outcome_index = find_element_in_list(list(DAG.nodes()), outcome_of_interest)
+    # est_ATE = (D1[:, outcome_index] - D0[:, outcome_index]).mean()
+	#
+    # print('ATE results', est_ATE, ATE, abs(ATE-est_ATE))
+    # r2x = r2_score(val_data[:, 0], D_val[:, 0].detach().cpu().numpy())
+    # r2x1 = r2_score(val_data[:, 1], D_val[:, 1].detach().cpu().numpy())
+    # r2y = r2_score(val_data[:, 2], D_val[:, 2].detach().cpu().numpy())
+    # print('R2X:', r2x)
+    # print('R2X1:', r2x1)
+    # print('R2Y:', r2y)
+	#
+	#
+    # rdf = RandomForestRegressor()
+    # rdf.fit(train_data[:, :2], train_data[:, 2])
+    # preds = rdf.predict(val_data[:, :2])
+	#
+    # print('sanity check R2 with RDF:')
+    # r2y_rdf = r2_score(val_data[:, 2], preds)
+    # print('R2Y:', r2y_rdf)
+	#
+    # return r2y
 
     ############################################################################################################
 

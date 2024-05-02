@@ -3,200 +3,324 @@ from torch.nn import functional as F
 import torch.nn as nn
 import networkx as nx
 import numpy as np
+from typing import Optional, Dict, List, Tuple, Union
 
-def adjacency_mod(adjacency_matrix, causal_ordering):  # TODO: remove if function not needed
-    # this is just a temporary function to see if adding a 1 to the diagonal for all zeroth-order variables helps
-    for i, var in enumerate(causal_ordering.keys()):
-        order = causal_ordering[var]
-        if order == 0:
-            adjacency_matrix[i, i] = 1  # add 1 to the i-th diagonal element
-    return adjacency_matrix
 
+# 1. introduce dag into attention
+# 2. introduce diagonal after first layer
+# 3. handle skip connection masking issue
+
+# note that the network has MHA with blocks in parallel, but this is also done sequentially, combining
+# both network width and network depth.
+
+# for the causal transformer, we have to be careful that we include a 'diagonal' pass-thru after the first layer
+# otherwise, and e.g. in a three variable chain A->B->C, the dependency structure will prevent B from being predicted
+# from A <after the first layer>, because B is caused by A, not by itself. So the diagonal of ones should be
+# introduced after the first layer.
+
+class Swish(nn.Module):
+	def forward(self, x):
+		return x * torch.sigmoid(x)
 
 
 # adapted from example GPT code  https://github.com/karpathy/ng-video-lecture
 class Head(nn.Module):
-    def __init__(self, head_size, dropout_rate, dag, interaction_type, dag_type):
-        super().__init__()
-        self.interaction_type = interaction_type
-        self.key = nn.Linear(1, head_size, bias=False)
-        self.query = nn.Linear(1, head_size, bias=False)
-        self.value = nn.Linear(1, head_size, bias=False)
-        # user a register buffer (not a module parameter) for the creation of self.dag
-        # dag will determine what variables can communicate with each other
+	"""
+	Implements a single attention head.
+	"""
 
-        self.dag_orig = dag
+	def __init__(self, head_size: int, input_dim: int, dropout_rate: float, dag: torch.Tensor):
+		super().__init__()
+		self.key = nn.Linear(input_dim, head_size, bias=False)
+		self.query = nn.Linear(input_dim, head_size, bias=False)
+		self.value = nn.Linear(input_dim, head_size, bias=False)
 
-        diagonal = -1 if dag_type == 1 else 0
-        if dag_type != 2:
-            matrix = torch.ones_like(self.dag_orig)
-            self.dag_orig = torch.tril(matrix, diagonal=diagonal)  #, diagonal=-1)   #if triu.diagonal=1 or tril.diagonal=-1 then <remove> diagonal  # TODO: remove these last two lines once testing is complete
+		self.head_size = head_size
+		# user a register buffer (not a module parameter) for the creation of self.dag
+		# dag will determine what variables can communicate with each other
+		self.dag_orig = dag
+		self.register_buffer('dag_mod', self.dag_orig)  # include transpose
+		self.dropout = nn.Dropout(dropout_rate)
+		self.act = Swish()
+		self.att_wei = None
 
-        self.register_buffer('dag_mod', self.dag_orig)  # include transpose
-        self.dropout = nn.Dropout(dropout_rate)
-        self.act = nn.LeakyReLU()
+	def forward(self, X: torch.Tensor) -> torch.Tensor:
+		"""
+		Forward pass for the Head module.
+		"""
+		K = self.key(X)  # B, T, hs
+		Q = self.query(X)  # B, T, hs
+		V = self.value(X)  # B, T, hs
+		B, T, HS = Q.shape
+		QK = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
+		self.att_wei = QK.masked_fill(self.dag_mod == 0, float('-inf'))
+		self.att_wei = F.softmax(self.att_wei, dim=-1)
+		nan_rows = torch.any(torch.isnan(self.att_wei),
+		                     dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
+		nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei)
+		self.att_wei = torch.where(nan_mask, torch.zeros_like(self.att_wei),
+		                           self.att_wei)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+		out = self.att_wei.transpose(1, 2) @ V  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+		out = self.act(out)
+		return out
 
-        self.att_wei = None
-    def forward(self, X):
-
-        K = self.key(X)  # B, T, hs
-        Q = self.query(X)  # B, T, hs
-        V = self.value(X)  # B, T, hs
-        B, T, HS = Q .shape
-        if self.interaction_type == 0:
-            QK = torch.add(Q, K)
-        elif self.interaction_type == 1:
-            QK = (Q * K)
-        elif self.interaction_type == 2:
-            QK = Q
-
-        # QK = (Q * K)  # elementwise multiplication  (bs, dims, 1), this is not the regular attention computation
-        self.att_wei = QK.repeat(1, 1, T).transpose(-2, -1)  # stack horizontally (bs, dims, dims)
-        self.att_wei = self.att_wei.masked_fill(self.dag_mod == 0, float('-inf'))
-        self.att_wei = F.softmax(self.att_wei, dim=-1)
-        nan_rows = torch.any(torch.isnan(self.att_wei), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-        nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei)
-        self.att_wei = torch.where(nan_mask, torch.zeros_like(self.att_wei), self.att_wei) # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-        self.att_wei = self.dropout(self.att_wei)
-        out = self.att_wei @ V
-        return self.act(out)
 
 class MultiHeadAttention(nn.Module):
+	"""
+	Implements multi-head attention combining several heads.
+	"""
 
-    def __init__(self, num_heads, head_size, dropout_rate, dag, interaction_type, dag_type):
-        super().__init__()
-        self.heads = nn.ModuleList([Head(head_size=head_size, dropout_rate=dropout_rate, dag=dag, dag_type=dag_type, interaction_type=interaction_type) for _ in range(num_heads)])
-        self.projection = nn.Linear(int(head_size*num_heads), 1)
-        self.dropout = nn.Dropout(dropout_rate)
-        self.act = nn.LeakyReLU()
+	def __init__(self, num_heads: int, input_dim: int, head_size: int, dropout_rate: float, dag: torch.Tensor):
+		super().__init__()
+		self.heads = nn.ModuleList(
+			[Head(head_size=head_size, input_dim=input_dim, dropout_rate=dropout_rate, dag=dag) for _ in
+			 range(num_heads)])
+		self.projection = nn.Linear(int(head_size * num_heads), input_dim)
+		self.dropout = nn.Dropout(dropout_rate)
+		self.act = nn.LeakyReLU()
 
-    def forward(self, X):
-        out = torch.cat([h(X) for h in self.heads], dim=-1)
-        out = self.dropout(self.projection(out))
-        return self.act(out)
+	def forward(self, X: torch.Tensor) -> torch.Tensor:
+		"""
+		Forward pass for the MultiHeadAttention module.
+		"""
+		out = torch.cat([h(X) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
+		out = self.dropout(self.projection(out))  # B, T, input_dim
+		return self.act(out)
 
 
 class FF(nn.Module):
-    def __init__(self, n_embed, dropout_rate):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(n_embed, 4 * n_embed),
-            nn.ReLU(),
-            nn.Linear(4 * n_embed, n_embed),
-            nn.Dropout(dropout_rate),
-        )
+	"""
+	Implements a feedforward neural network.
+	"""
 
-    def forward(self, X):
-        out = self.net(X)
-        return out
+	def __init__(self, input_dim: int, ff_n_embed: int, dropout_rate: float):
+		super().__init__()
+		self.net = nn.Sequential(
+			nn.Linear(input_dim, ff_n_embed),
+			nn.ReLU(),
+			nn.Linear(ff_n_embed, input_dim),
+			nn.Dropout(dropout_rate),
+		)
+
+	def forward(self, X: torch.Tensor) -> torch.Tensor:
+		"""
+		Forward pass for the FF module.
+		"""
+		out = self.net(X)
+		return out
 
 
 class Block(nn.Module):
+	"""
+	Implements a block containing MultiHeadAttention followed by a feedforward network.
+	"""
 
-    def __init__(self, n_embed, num_heads, head_size,  dropout_rate, dag, interaction_type, dag_type):
-        super().__init__()
-        self.mha = MultiHeadAttention(num_heads, head_size, dropout_rate, dag, interaction_type, dag_type=dag_type)
-        self.ff = FF(n_embed, dropout_rate)
+	def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
+	             dag: torch.Tensor):
+		super().__init__()
+		self.mha = MultiHeadAttention(num_heads=num_heads, input_dim=input_dim, head_size=head_size,
+		                              dropout_rate=dropout_rate, dag=dag)
+		self.ff = FF(input_dim=input_dim, ff_n_embed=ff_n_embed, dropout_rate=dropout_rate)
+		if isinstance(dag, torch.Tensor):
+			dag = dag.clone().detach()
+		else:
+			dag = torch.tensor(dag, dtype=torch.float)  # Only convert to tensor if not already one
+		self.register_buffer('dag_mask', dag.unsqueeze(0))  # Adding batch dimension
 
-    def forward(self, X):
-        X = self.mha(X)  # + X  with skip connection (careful with adding back in after having masked it)
-        X = X + self.ff(X)  # with skip connection
-        return X
+	def forward(self, X: torch.Tensor) -> torch.Tensor:
+		"""
+		Forward pass for the Block module.
+		"""
+		mha_out = self.mha(X)
+		ff_out = self.ff(mha_out)
+		mha_out = mha_out + ff_out
+		return mha_out
+
+
+class CaT(nn.Module):
+	def __init__(
+			self,
+			input_dim: int,
+			num_heads: int,
+			ff_n_embed: int,
+			head_size: int,
+			n_layers: int,
+			dag: nx.DiGraph,
+			dropout_rate: float,
+			var_types_sorted: Dict[str, str],
+			causal_ordering: Dict[str, int],
+			device: torch.device
+	):
+		'''
+		Initialize components of the Causal Transformer.
+
+		Args:
+			input_dim (int): Dimensionality of the input embeddings.
+			num_heads (int): Number of attention heads.
+			ff_n_embed (int): Dimensionality of the feedforward network inside the multi-head attention.
+			head_size (int): Dimension of each attention head.
+			n_layers (int): Number of layers in the network.
+			dag (networkx.DiGraph): Topologically sorted directed acyclic graph.
+			dropout_rate (float): Dropout rate to use within attention and feedforward layers.
+			var_types_sorted (dict): Dictionary specifying the variable types ('bin', 'cont', 'cat').
+			causal_ordering (dict): Ordering of variables for causal relationships.
+			device (torch.device): The device the model should use.
+		'''
+		super().__init__()
+		self.input_dim = input_dim
+		self.num_heads = num_heads
+		self.ff_n_embed = ff_n_embed
+		self.head_size = head_size
+		self.nxdag = dag
+		self.orig_var_name_ordering = list(self.nxdag.nodes())
+		dag = torch.tensor(nx.to_numpy_array(self.nxdag)).to(device)
+		self.device = device
+		self.n_layers = n_layers
+		self.dropout_rate = dropout_rate
+		self.causal_ordering = causal_ordering
+
+		self.blocks = nn.ModuleList()
+		self.loss_func = MixedLoss(var_types_sorted, orig_var_name_ordering=self.orig_var_name_ordering)
+		self.lm_head = nn.Linear(self.input_dim, self.input_dim)
+
+		# Store original and setup DAG
+		self.original_dag = torch.tensor(dag, dtype=torch.float, device=device)
+		self.eye = torch.eye(self.original_dag.size(0), device=device)
+		self.was_shuffled = False
+
+		self.initialize_blocks()
+
+	def modify_dag(self, layer_index: int, dag: torch.Tensor) -> torch.Tensor:
+		"""
+		Adjusts the DAG for a given layer by optionally adding an identity matrix.
+
+		Args:
+			layer_index (int): Index of the current layer, determining if identity should be added.
+			dag (torch.Tensor): The current DAG tensor.
+
+		Returns:
+			torch.Tensor: The modified DAG tensor.
+		"""
+
+		modified_dag = dag.clone()
+		if layer_index > 0:  # Add identity diagonal to ensure self-connections in subsequent layers
+			modified_dag += self.eye
+		return torch.clamp(modified_dag, 0, 1)
+
+	def initialize_blocks(self) -> None:
+		"""
+		Initializes each layer/block with the appropriate DAG setup for the model.
+		"""
+		for i in range(self.n_layers):
+			current_dag = self.modify_dag(i, self.original_dag)
+			self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
+			                         input_dim=self.input_dim, head_size=self.head_size,
+			                         dropout_rate=self.dropout_rate, dag=current_dag))
+
+	def reset_blocks(self) -> None:
+		"""
+		Resets the DAGs in all heads of all blocks to their original configurations.
+		"""
+		for i, block in enumerate(self.blocks):
+			original_dag = self.modify_dag(i, self.original_dag)
+			for head in block.mha.heads:
+				head.dag_mod = original_dag
+
+	def forward(self, X: torch.Tensor, targets: Optional[torch.Tensor] = None, shuffling: bool = False) -> Union[
+		torch.Tensor, Tuple[torch.Tensor, torch.Tensor, Dict]]:
+		"""
+		Processes input through the model, applying shuffling if specified.
+
+		Args:
+			X (torch.Tensor): Input tensor.
+			targets (torch.Tensor): Target tensor, optional.
+			shuffling (bool): Whether to shuffle the input and corresponding DAG.
+
+		Returns:
+			torch.Tensor or tuple: Output tensor or tuple of output, loss, and loss tracker if targets provided.
+		"""
+
+		shuffle_ordering = None
+		if shuffling:
+			# Shuffle X, targets, and the DAG using the shuffler function
+			X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, self.original_dag.clone().cpu().numpy())
+			shuffled_dag = torch.tensor(shuffled_dag, dtype=torch.float, device=self.device)
+
+			# Apply the shuffled DAG to each block
+			for i, block in enumerate(self.blocks):
+				updated_dag = self.modify_dag(i, shuffled_dag)
+				for head in block.mha.heads:
+					head.dag_mod = updated_dag
+			self.was_shuffled = True  # Mark that we have shuffled in this pass
+		else:
+			if self.was_shuffled:
+				# If the previous call used shuffling but this one does not, reset the DAGs
+				self.reset_blocks()
+				self.was_shuffled = False  # Reset the shuffling flag as we have reverted to the original DAG
+			shuffle_ordering = np.arange(X.shape[1])
+
+		for block in self.blocks:
+			X = block(X)
+		X = self.lm_head(X)
+
+		if targets is None:
+			return X
+		else:
+			loss, loss_tracker = self.loss_func(X, targets, shuffle_ordering)
+			return X, loss, loss_tracker
+
+
+def init_weights(m):
+	if isinstance(m, nn.Linear):
+		#         nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
+		m.weight.data.fill_(1)
+		# Check if the linear module has a bias term and set it to 1 if it exists
+		if m.bias is not None:
+			m.bias.data.fill_(0)
+
+
+def initialize_model_weights(model):
+	# Apply init_weights to all sub-modules of the model
+	model.apply(init_weights)
 
 
 class MixedLoss(nn.Module):
-    def __init__(self, var_types_sorted, causal_ordering):
-        super(MixedLoss, self).__init__()
-        self.causal_ordering = causal_ordering
-        self.var_types_sorted = var_types_sorted  # sorted types for determining which loss to use
-        self.cont_loss = nn.MSELoss()  # Loss for continuous variables
-        self.bin_loss = nn.BCEWithLogitsLoss()  # Loss for binary variables
-        self.cat_loss = nn.CrossEntropyLoss()   # takes logits for each class as input
+	def __init__(self, var_types_sorted, orig_var_name_ordering):
+		super(MixedLoss, self).__init__()
+		self.orig_var_name_ordering = orig_var_name_ordering
+		self.var_types_sorted = var_types_sorted  # sorted types for determining which loss to use
+		self.cont_loss = nn.MSELoss()  # Loss for continuous variables
+		self.bin_loss = nn.BCEWithLogitsLoss()  # Loss for binary variables
+		self.cat_loss = nn.CrossEntropyLoss()  # takes logits for each class as input
 
-    def forward(self, pred, target, shuffle_ordering):
+	def forward(self, pred, target, shuffle_ordering):
+		total_loss = 0
+		loss_tracking = {}
 
-        total_loss = 0
-        loss_tracking = {}
-        sorted_vars = [list(self.var_types_sorted.keys())[i] for i in shuffle_ordering]
-        for i, var_name in enumerate(sorted_vars):
-            var_type = self.var_types_sorted[var_name]
-            order = self.causal_ordering[var_name]
-            # if order != 0:  # don't generate a loss for predicting stuff with no parents
-            if var_type == 'cont':
-                loss = self.cont_loss(pred[:, i], target[:, i])
-            elif var_type == 'bin':
-                loss = self.bin_loss(pred[:, i], target[:, i])
-            elif var_type == 'cat':
-                loss = self.cat_loss(pred[:, i].unsqueeze(0), target[:, i].long())
+		pred = pred[:, shuffle_ordering]
+		target = target[:, shuffle_ordering]
 
-            loss_tracking[var_name] = loss.item()
-            total_loss += loss
+		for i, var_name in enumerate(self.orig_var_name_ordering):
 
-        return total_loss, loss_tracking
+			var_type = self.var_types_sorted[var_name]
+			idx = shuffle_ordering[i]
 
+			if var_type == 'cont':
+				loss = self.cont_loss(pred[:, i], target[:, i])
+			elif var_type == 'bin':
+				loss = self.bin_loss(pred[:, i], target[:, i])
+			elif var_type == 'cat':
+				loss = self.cat_loss(pred[:, i].unsqueeze(0), target[:, i].long())
 
-def shuffler(X, targets, dag, shuffling=False):
-    # shuffles the order of X, targets, and adjacency matrix for a batch
-    if shuffling:
-        shuffle_ordering = np.random.permutation(X.shape[1])
-    else:
-        shuffle_ordering = np.arange(0, X.shape[1])
-    return X[:, shuffle_ordering], dag[shuffle_ordering, :], targets[:, shuffle_ordering], shuffle_ordering
+			loss_tracking[var_name] = loss.item()
+			total_loss += loss
 
-class CaT(nn.Module):
-
-    def __init__(self, dropout_rate, num_heads, head_size, n_layers, dag, device, ordering, var_types,
-                 interaction_type=0, shuffling=0, dag_type=0):
-        '''
-        :param dag_type: Whether to use the lower-triangular with diagonal (=0), the lower-triangular without diagonal (=1) or causal adjacency matrix (=2)
-        :param dropout_rate:
-        :param num_heads:
-        :param head_size:
-        :param n_layers:
-        :param interaction_type: type of interaction in attention layer
-        :param dag: topologically sorted networkx digraph object
-        :param device: 'cuda' or 'cpu'
-        :param ordering: a dictionary of variable names with corresponding index in causal ordering
-        :param var_types: a dictionary of variable types 'bin' (binary) 'cont' (continuous) or 'cat' (categorical)
-        '''
-
-        super().__init__()
-        var_types_sorted = {k: var_types[k] for k in list(dag.nodes)}  # get the variable types bin/cont/cat in the 'right order'
-        self.n_layers = n_layers
-        self.num_heads = num_heads
-        self.ordering = ordering
-        self.nxdag = dag
-        dag = torch.tensor(nx.to_numpy_array(dag)).to(device).T  # get adjacency matrix and add diagonals (TODO: remove adj_mod if not needed)
-        self.device = device
-        self.blocks = nn.Sequential(
-            *[Block(n_embed=1, num_heads=num_heads, head_size=head_size, dropout_rate=dropout_rate, dag=dag, dag_type=dag_type, interaction_type=interaction_type) for _ in range(n_layers)])
-        self.lm_head = nn.Linear(1, 1)
-        self.loss_func = MixedLoss(var_types_sorted, ordering)
-        self.shuffling = shuffling
-
-    def forward(self, X, targets=None):
-        X = X[:, :, None]  # (B, num_vars, C=1)
-
-        if targets is not None:
-            orig_dag = self.blocks[0].mha.heads[0].dag_orig
-            X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, orig_dag, shuffling=self.shuffling)
-            for i in range(self.n_layers):
-                for j in range(self.num_heads):
-                    self.blocks[i].mha.heads[j].dag_mod = shuffled_dag  # changes the ordering of X, targets, and dag on a per batch basis
-
-        elif targets == None:
-            for i in range(self.n_layers):
-                for j in range(self.num_heads):
-                    self.blocks[i].mha.heads[j].dag_mod = self.blocks[0].mha.heads[0].dag_orig
-
-        X = self.blocks(X)  # B, num_vars, head_size
-        X = self.lm_head(X)
-        X = X[:, :, 0]
-
-        if targets == None:
-            return X
-        elif targets is not None:
-            loss, loss_tracker = self.loss_func(X, targets, shuffle_ordering)  # pull out the Y variable as the target
-            return X, loss, loss_tracker
+		return total_loss, loss_tracking
 
 
+def shuffler(X, targets, dag):
+	shuffle_ordering = np.random.permutation(X.shape[1])
+	shuffled_X = X[:, shuffle_ordering]
+	shuffled_dag = dag[shuffle_ordering, :][:, shuffle_ordering]
+	shuffled_targets = targets[:, shuffle_ordering]
+	return shuffled_X, shuffled_dag, shuffled_targets, shuffle_ordering

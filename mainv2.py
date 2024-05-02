@@ -16,14 +16,14 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dataset",
         type=str,
-        default='synth1',
+        default='simple_test_v2',
         required=True,
         help="Name of the dataset to be used for training and/or testing."
     )
     parser.add_argument(
         "--device",
         type=str,
-        default='cuda',
+        default='cpu',
         help="Device to train and/or run the model ('cuda' or 'cpu')."
     )
 
@@ -99,20 +99,27 @@ if __name__ == '__main__':
     parser.add_argument(
         "--head_size",
         type=int,
-        default=4,
+        default=10,
         help="Embedding dimension within the transformer."
+    )
+
+    parser.add_argument(
+	    "--ff_n_embed",
+	    type=int,
+	    default=10,
+	    help="Embedding dimension within the full connected parts of the transformer."
     )
 
     parser.add_argument(
         "--dropout_rate",
         type=float,
-        default=0.3,
+        default=0.2,
         help="Dropout probability during training."
     )
     parser.add_argument(
         "--n_layers",
         type=int,
-        default=8,
+        default=4,
         help="Number of layers in model."
     )
 
@@ -161,7 +168,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--optuna_num_trials",
         type=int,
-        default=60,
+        default=10,
         help="Number of optuna hyperparameter search trials."
     )
     parser.add_argument(
@@ -177,7 +184,6 @@ if __name__ == '__main__':
         default=0,
         help="Whether to shuffle the ordering of variables and the dag, 0 = no, 1 = yes"
     )
-
 
 
     args = parser.parse_args()
