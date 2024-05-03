@@ -9,6 +9,19 @@ from optuna.trial import TrialState
 from trainer import objective
 
 
+def parse_layers(value):
+    # This function takes a string and converts it to a list of integers
+    try:
+        # Split the string by comma and convert each item to an integer
+        layers = list(map(int, value.split(',')))
+        if not all(n > 0 for n in layers):
+            raise ValueError("All numbers of neurons must be positive.")
+        return layers
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid layer configuration: {value}. Error: {e}")
+
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -16,14 +29,14 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dataset",
         type=str,
-        default='synth1',
+        default='simple_test_v2',
         required=True,
         help="Name of the dataset to be used for training and/or testing."
     )
     parser.add_argument(
         "--device",
         type=str,
-        default='cuda',
+        default='cpu',
         help="Device to train and/or run the model ('cuda' or 'cpu')."
     )
 
@@ -57,24 +70,28 @@ if __name__ == '__main__':
         default=10,
         help="Batch size for training"
     )
+
     parser.add_argument(
         "--max_iters",
         type=int,
         default=100,
         help="Iterations for training."
     )
+
     parser.add_argument(
         "--eval_interval",
         type=int,
         default=10,
         help="Number of training iterations which pass before evaluation."
     )
+
     parser.add_argument(
         "--eval_iters",
         type=int,
         default=10,
         help="Number of evaluation batches to estimate loss with."
     )
+
     parser.add_argument(
         "--learning_rate",
         type=float,
@@ -89,31 +106,18 @@ if __name__ == '__main__':
         help="Iterations for model checkpointing."
     )
 
-    parser.add_argument(
-        "--num_heads",
-        type=int,
-        default=4,
-        help="Number of transformer heads."
-    )
-
-    parser.add_argument(
-        "--head_size",
-        type=int,
-        default=4,
-        help="Embedding dimension within the transformer."
-    )
 
     parser.add_argument(
         "--dropout_rate",
         type=float,
-        default=0.3,
+        default=0.2,
         help="Dropout probability during training."
     )
+
     parser.add_argument(
-        "--n_layers",
-        type=int,
-        default=8,
-        help="Number of layers in model."
+	    "--neurons_per_layer",
+	    type=parse_layers,
+	    help="Sequence of number of neurons per layer, e.g., '4,8,16,8,4'. Check other necessary conditions in trainer.py"
     )
 
     parser.add_argument(
@@ -161,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--optuna_num_trials",
         type=int,
-        default=60,
+        default=10,
         help="Number of optuna hyperparameter search trials."
     )
     parser.add_argument(
@@ -177,7 +181,6 @@ if __name__ == '__main__':
         default=0,
         help="Whether to shuffle the ordering of variables and the dag, 0 = no, 1 = yes"
     )
-
 
 
     args = parser.parse_args()

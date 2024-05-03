@@ -1,15 +1,12 @@
 import torch
 import torch.optim as optim
-import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import numpy as np
 from datasets import generate_data
 import warnings
-from inference import CausalInference, find_element_in_list, predict
-from model import CaT
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import r2_score
+from CaT.model import CaT
+
 warnings.filterwarnings("ignore")
 
 
@@ -70,7 +67,7 @@ def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, mo
                     xb = get_batch(train_data=train_data, val_data=val_data, split=split, device=device,
                                    batch_size=batch_size)
                     xb_mod = torch.clone(xb.detach())
-                    X, loss, loss_dict = model(X=xb, targets=xb_mod)
+                    X, loss, loss_dict = model(X=xb, targets=xb_mod, shuffling=False)
                     losses[k] = loss.item()
                 eval_loss[split] = losses.mean()
             model.train()
