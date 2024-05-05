@@ -215,6 +215,30 @@ def generate_data(N, seed, dataset, standardize=1):
 		DAGnx.add_node('C')
 		DAGnx.add_node('Y')
 
+	elif dataset == 'simple_test_v3':
+		data = np.zeros((N, 4, 1))
+
+		for i in range(4):
+			data[:, i, :] = (i + 1)
+
+		A = data[:, 0, :]
+		B = data[:, 1, :]
+		C = data[:, 2, :]
+		Y = data[:, 3, :]
+
+		Y0 = Y
+		Y1 = Y
+
+		all_data_dict = {'A': A, 'B': B, 'C': C, 'Y': Y}
+
+		# types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
+		var_types = {'A': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}
+
+		#         DAGnx.add_edges_from([('A', 'B'), ('B', 'C'), ('C', 'Y')])
+		DAGnx.add_edges_from([('A', 'B'), ('C', 'B')])
+		DAGnx.add_node('C')
+		DAGnx.add_node('Y')
+
 	else:
 		raise NotImplementedError
 
@@ -228,8 +252,5 @@ def generate_data(N, seed, dataset, standardize=1):
 	plt.savefig(f'{dataset}_graph.png')
 
 	causal_ordering = get_full_ordering(DAGnx)
-
-	print('AFTER:', list(DAGnx.nodes()))
-	print(nx.to_numpy_array(DAGnx))
 
 	return all_data, DAGnx, causal_ordering, var_types, Y0, Y1

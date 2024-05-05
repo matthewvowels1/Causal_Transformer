@@ -24,8 +24,8 @@ class MaskedLinear(nn.Module):
         super(MaskedLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        self.bias = nn.Parameter(torch.zeros(out_features))
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features)).float()
+        self.bias = nn.Parameter(torch.zeros(out_features)).float()
         self.mask = None
         self.reset_parameters()
 
@@ -39,10 +39,10 @@ class MaskedLinear(nn.Module):
         """
         if isinstance(mask, np.ndarray):
             # Convert from NumPy array to Tensor and set the correct dtype
-            mask_tensor = torch.from_numpy(mask).to(torch.float64)
+            mask_tensor = torch.from_numpy(mask).float()
         elif isinstance(mask, torch.Tensor):
             # Ensure the tensor is the correct dtype
-            mask_tensor = mask.to(torch.float64)
+            mask_tensor = mask.float()
         else:
             raise TypeError("Mask must be a NumPy array or a PyTorch tensor.")
 

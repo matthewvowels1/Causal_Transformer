@@ -142,31 +142,35 @@ def generate_data(N, seed, dataset, standardize=1):
 		DAGnx.add_edges_from([('X', 'Y'), ('X2', 'Y')])
 
 	elif dataset == 'simple_test_v2':
-		data = np.zeros((N, 4, 5))
 
-		for i in range(4):
-			data[:, i, :] = (i + 1)
+		Ua = np.random.randn(N)
+		A = Ua
+		Ub = 0.1 * np.random.randn(N)
+		B = 2 * A + Ub
+		Uc = 0.1 * np.random.randn(N)
+		C = 2 * B + Uc
+		Uy = 0.1 * np.random.randn(N)
+		Y = 2 * A + 2 * C + Uy
 
-		A = np.random.randn(N)
-		B = 2 * A + 0.1 * np.random.randn(N)
-		C = 2 * B + 0.1 * np.random.randn(N)
-		Y = 2 * A + 2 * C + 0.1 * np.random.randn(N)
+		B0 = Ub
+		B1 = 2 + Ub
 
-		Y0 = 2 * C + 0.1 * np.random.randn(N)
-		Y1 = 2 + 2 * C + 0.1 * np.random.randn(N)
+		C0 = 2 * B0 + Uc
+		C1 = 2 * B1 + Uc
 
-		all_data_dict = {'A': A, 'B': B, 'C': C, 'Y': Y}
+		Y0 = 2 * C0 + 0.1 * np.random.randn(N)
+		Y1 = 2 + 2 * C1 + 0.1 * np.random.randn(N)
+
+		all_data_dict = {'X': A, 'B': B, 'C': C, 'Y': Y}
 
 		# types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
-		var_types = {'A': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}
+		var_types = {'X': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}
 
 		#         DAGnx.add_edges_from([('A', 'B'), ('B', 'C'), ('C', 'Y')])
-		DAGnx.add_edges_from([('A', 'B'), ('B', 'C'), ('C', 'Y')])
-
+		DAGnx.add_edges_from([('X', 'B'), ('B', 'C'), ('C', 'Y'), ('X', 'Y')])
 
 	else:
 		raise NotImplementedError
-
 
 	var_names = list(DAGnx.nodes())  # topologically ordered list of variables
 	all_data = np.stack([all_data_dict[key] for key in var_names], axis=1)

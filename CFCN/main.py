@@ -117,6 +117,7 @@ if __name__ == '__main__':
     parser.add_argument(
 	    "--neurons_per_layer",
 	    type=parse_layers,
+	    required=True,
 	    help="Sequence of number of neurons per layer, e.g., '4,8,16,8,4'. Check other necessary conditions in trainer.py"
     )
 
@@ -130,7 +131,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--sample_size",
         type=int,
-        default=1000,
+        default=10000,
         help="Sample size for chosen dataset (where applicable)."
     )
 

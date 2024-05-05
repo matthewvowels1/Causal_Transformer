@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datasets import generate_data
 import warnings
-from CaT.model import CaT
+from model import CaT
 
 warnings.filterwarnings("ignore")
 

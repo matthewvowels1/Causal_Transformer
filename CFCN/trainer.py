@@ -10,7 +10,7 @@ import warnings
 from model import DAGAutoencoder
 import utils
 warnings.filterwarnings("ignore")
-
+from inference import CausalInference, CausalMetrics
 
 
 def assert_neuron_layers(layers, input_size):
@@ -163,7 +163,7 @@ def objective(trial, args):
     df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
 
     input_dim = all_data.shape[1]
-
+    print(input_dim)
     # prepend the input size to neurons_per_layer
     # append the intput size to neurons_per_layer (output)
     neurons_per_layer.insert(0, input_dim)
@@ -231,3 +231,6 @@ def objective(trial, args):
                       checkpointing_on=checkpointing_on,
                       shuffling=shuffling
                           )
+
+    causal_mod =
+    predictions_x0, predictions_x1 = CausalInference.

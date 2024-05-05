@@ -118,22 +118,33 @@ class Block(nn.Module):
 	def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
 	             dag: torch.Tensor):
 		super().__init__()
-		self.mha = MultiHeadAttention(num_heads=num_heads, input_dim=input_dim, head_size=head_size,
+
+		self.ff_n_embed = ff_n_embed
+		self.input_dim = input_dim
+		self.head_size = head_size
+		self.num_heads = num_heads
+		self.mha = MultiHeadAttention(num_heads=self.num_heads, input_dim=self.input_dim, head_size=self.head_size,
 		                              dropout_rate=dropout_rate, dag=dag)
-		self.ff = FF(input_dim=input_dim, ff_n_embed=ff_n_embed, dropout_rate=dropout_rate)
+		self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate)
 		if isinstance(dag, torch.Tensor):
 			dag = dag.clone().detach()
 		else:
 			dag = torch.tensor(dag, dtype=torch.float)  # Only convert to tensor if not already one
 		self.register_buffer('dag_mask', dag.unsqueeze(0))  # Adding batch dimension
 
+		self.ln1 = nn.LayerNorm(self.input_dim)
+		self.ln2 = nn.LayerNorm(self.input_dim)
+		self.ln3 = nn.LayerNorm(self.input_dim)
+
 	def forward(self, X: torch.Tensor) -> torch.Tensor:
 		"""
 		Forward pass for the Block module.
 		"""
-		mha_out = self.mha(X)
-		ff_out = self.ff(mha_out)
-		mha_out = mha_out + ff_out
+
+		mha_out = self.ln1(self.mha(X))
+
+		ff_out = self.ln2(self.ff(mha_out))
+		mha_out = self.ln3(mha_out + ff_out)
 		return mha_out
 
 
@@ -182,6 +193,8 @@ class CaT(nn.Module):
 		self.blocks = nn.ModuleList()
 		self.loss_func = MixedLoss(var_types_sorted, orig_var_name_ordering=self.orig_var_name_ordering)
 		self.lm_head = nn.Linear(self.input_dim, self.input_dim)
+
+		self.ln = nn.LayerNorm(self.input_dim)
 
 		# Store original and setup DAG
 		self.original_dag = torch.tensor(dag, dtype=torch.float, device=device)
@@ -261,7 +274,7 @@ class CaT(nn.Module):
 
 		for block in self.blocks:
 			X = block(X)
-		X = self.lm_head(X)
+		X = self.lm_head(self.ln(X))
 
 		if targets is None:
 			return X
