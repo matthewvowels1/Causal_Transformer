@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import networkx as nx
 import utils
-
+from typing import Union
 
 def remove_incoming_edges(graph, target_node='X'):
     """
@@ -26,10 +26,7 @@ def remove_incoming_edges(graph, target_node='X'):
     # List of all incoming edges to the target node
     incoming_edges = list(modified_graph.in_edges(target_node))
 
-    # Remove incoming edges
     modified_graph.remove_edges_from(incoming_edges)
-
-    print(f"All incoming edges to {target_node} have been removed.")
     return modified_graph
 
 
@@ -38,17 +35,19 @@ class CausalInference:
     A template class for performing causal inference by modifying a specific variable 'X'
     in the dataset and observing the changes in the model's predictions.
     """
-    def __init__(self, dataset, model):
+    def __init__(self, dataset: Union[dict, np.ndarray], model: torch.nn.Module, device: Union[torch.device, str]):
         """
         Initializes the CausalInference class with a dataset and a model.
 
         Args:
-            dataset (dict): The dataset as a dictionary.
-            model (callable): The predictive model.
-            dag (nxDigraph object): The DAG for the underlying DGP
+            dataset (Union[dict, np.ndarray]): The dataset as a dictionary or numpy array.
+            model (nn.Module): The predictive model.
+            device (Union[torch.device, str]): The device on which to perform computations,
+                                                can be a torch-compatible type specifying CPU or GPU.
         """
         self.dataset = dataset
         self.model = model
+        self.device = torch.device(device)
 
     def set_variable(self, var_name='X', value=1):
         """
@@ -64,7 +63,7 @@ class CausalInference:
         modified_dataset = {key: np.copy(val) if key != var_name else np.full_like(val, value) for key, val in self.dataset.items()}
         return modified_dataset
 
-    def predict(self, modified_dataset, batch_size=100):
+    def predict(self, modified_dataset, batch_size=100, modify_masks=True):
         """
         Predicts outcomes using the model for a modified dataset.
 
@@ -75,36 +74,36 @@ class CausalInference:
             np.array: The model's predictions.
         """
 
-        modified_dag = remove_incoming_edges(self.model.dag)
-        modified_adj_matrix = nx.to_numpy_array(modified_dag)
+        if modify_masks:
+            modified_dag = remove_incoming_edges(self.model.dag)
+            modified_adj_matrix = nx.to_numpy_array(modified_dag)
 
-        modified_masks = [torch.from_numpy(mask).float().to(torch.float64) for mask in
-                         utils.expand_adjacency_matrix(self.model.neurons_per_layer[1:], modified_adj_matrix)]
+            modified_masks = [torch.from_numpy(mask).float().to(torch.float64) for mask in
+                             utils.expand_adjacency_matrix(self.model.neurons_per_layer[1:], modified_adj_matrix)]
 
-        self.model.set_masks(modified_masks)
 
-        num_samples = len(next(iter(modified_dataset.values())))  # Assuming all fields have the same number of entries
+            self.model.set_masks(modified_masks)
+
+        tensor_dataset = np.column_stack([modified_dataset[key] for key in sorted(modified_dataset.keys())])
+
+        # Convert numpy array to torch tensor
+        tensor_dataset = torch.tensor(tensor_dataset, dtype=torch.float32).to(self.device)
+
+        num_samples = tensor_dataset.size(0)
         predictions = []
 
         for start in range(0, num_samples, batch_size):
-            end = start + batch_size
-            batch = {key: val[start:end] for key, val in modified_dataset.items()}
-
-            # Convert batch dictionary to appropriate tensor format if necessary
-            batch = {k: torch.tensor(v, dtype=torch.float32) if isinstance(v, np.ndarray) else v for k, v in
-                     batch.items()}
+            end = min(start + batch_size, num_samples)
+            batch = tensor_dataset[start:end]
 
             # Model prediction for the current batch
-            batch_predictions = self.model(batch)
-
-            # Convert predictions to numpy if necessary and store
-            if isinstance(batch_predictions, torch.Tensor):
-                batch_predictions = batch_predictions.detach().numpy()  # Convert to numpy array if tensor
+            batch_predictions = self.model(batch, shuffling=False)
             predictions.append(batch_predictions)
 
-        return np.concatenate(predictions)
+        # Concatenate all predictions into a single numpy array
+        return torch.cat(predictions).detach().cpu().numpy()
 
-    def infer_causal_effect(self, var_name='X'):
+    def infer_causal_effect(self, var_name='X', modify_masks=True):
         """
         Infers the causal effect of setting a variable 'X' to 0 and 1.
 
@@ -116,11 +115,11 @@ class CausalInference:
         """
         # Set the variable 'X' to 0
         dataset_x0 = self.set_variable(var_name, 0)
-        predictions_x0 = self.predict(dataset_x0)
+        predictions_x0 = self.predict(dataset_x0, modify_masks=modify_masks)
 
         # Set the variable 'X' to 1
         dataset_x1 = self.set_variable(var_name, 1)
-        predictions_x1 = self.predict(dataset_x1)
+        predictions_x1 = self.predict(dataset_x1, modify_masks=modify_masks)
 
         return predictions_x0, predictions_x1
 
@@ -154,16 +153,32 @@ class CausalMetrics:
         self.y0_pred = np.array(y0_pred)
         self.y1_pred = np.array(y1_pred)
 
-    def calculate_ate_error(self):
+        if self.y0_pred.shape != self.y0_true.shape:
+            raise ValueError("y0_pred must have the same dimensionality as y0_true")
+        if self.y1_pred.shape != self.y1_true.shape:
+            raise ValueError("y1_pred must have the same dimensionality as y1_true")
+
+    def calculate_ate(self):
         """
         Calculates the error in the Average Treatment Effect (ATE).
 
         Returns:
             float: The absolute error in the ATE estimate.
         """
-        ate_true = np.mean(self.y1_true - self.y0_true)
         ate_pred = np.mean(self.y1_pred - self.y0_pred)
-        return np.abs(ate_true - ate_pred)
+        return ate_pred
+
+    def calculate_ate_error(self, true_ate=None):
+        """
+        Calculates the error in the Average Treatment Effect (ATE).
+
+        Returns:
+            float: The absolute error in the ATE estimate.
+        """
+        if true_ate is None:
+            true_ate = np.mean(self.y1_true - self.y0_true)
+        ate_pred = np.mean(self.y1_pred - self.y0_pred)
+        return np.abs(true_ate - ate_pred)
 
     def calculate_pehe_error(self):
         """

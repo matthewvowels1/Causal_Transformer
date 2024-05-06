@@ -143,14 +143,14 @@ def generate_data(N, seed, dataset, standardize=1):
 
 	elif dataset == 'simple_test_v2':
 
-		Ua = np.random.randn(N)
-		A = Ua
+		Ux = np.random.randn(N)
+		X = Ux
 		Ub = 0.1 * np.random.randn(N)
-		B = 2 * A + Ub
+		B = 2 * X + Ub
 		Uc = 0.1 * np.random.randn(N)
 		C = 2 * B + Uc
 		Uy = 0.1 * np.random.randn(N)
-		Y = 2 * A + 2 * C + Uy
+		Y = 2 * X + 2 * C + Uy
 
 		B0 = Ub
 		B1 = 2 + Ub
@@ -161,7 +161,7 @@ def generate_data(N, seed, dataset, standardize=1):
 		Y0 = 2 * C0 + 0.1 * np.random.randn(N)
 		Y1 = 2 + 2 * C1 + 0.1 * np.random.randn(N)
 
-		all_data_dict = {'X': A, 'B': B, 'C': C, 'Y': Y}
+		all_data_dict = {'X': X, 'B': B, 'C': C, 'Y': Y}
 
 		# types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
 		var_types = {'X': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}

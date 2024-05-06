@@ -13,25 +13,6 @@ warnings.filterwarnings("ignore")
 from inference import CausalInference, CausalMetrics
 
 
-def assert_neuron_layers(layers, input_size):
-    # Assert that the smallest number of neurons is never lower than input_size
-    assert min(layers) >= input_size, "The smallest layer size must be at least the input size."
-
-    # Assert that subsequent layers change either not at all, or by a factor of 2
-    for i in range(1, len(layers)):
-        previous_layer, current_layer = layers[i-1], layers[i]
-        is_same = current_layer == previous_layer
-        is_double = current_layer == 2 * previous_layer
-        is_half = current_layer == previous_layer / 2
-        assert is_same or is_double or is_half, "Layer sizes must stay the same or change by a factor of 2."
-
-    # Assert that the first layer is a multiple of 2 of the input_size
-    assert layers[0] % input_size == 0 and ((layers[0] // input_size) & ((layers[0] // input_size) - 1)) == 0, \
-        "The first layer must be a multiple of 2 of the input size."
-
-
-
-
 def get_batch(train_data, val_data, split, device, batch_size):
     data = train_data if split == 'train' else val_data
     ix = torch.randint(0, len(data), (batch_size,))
@@ -168,7 +149,7 @@ def objective(trial, args):
     # append the intput size to neurons_per_layer (output)
     neurons_per_layer.insert(0, input_dim)
     neurons_per_layer.append(input_dim)
-    assert_neuron_layers(layers=neurons_per_layer, input_size=input_dim)
+    utils.assert_neuron_layers(layers=neurons_per_layer, input_size=input_dim)
 
     indices = np.arange(0, len(all_data))
     np.random.shuffle(indices)
