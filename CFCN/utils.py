@@ -18,6 +18,15 @@ def assert_neuron_layers(layers, input_size):
         "The first layer must be a multiple of 2 of the input size."
 
 
+def find_element_in_list(input_list, target_string):
+    matching_indices = []
+    for index, element in enumerate(input_list):
+        # Check if the element is equal to the target string
+        if element == target_string:
+            # If it matches, add the index to the matching_indices list
+            matching_indices.append(index)
+    return matching_indices
+
 
 def expand_matrix(original_matrix: np.ndarray, target_shape: Tuple[int, int]) -> np.ndarray:
     """

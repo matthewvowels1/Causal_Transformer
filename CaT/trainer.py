@@ -123,7 +123,6 @@ def objective(trial, args):
         num_heads = trial.suggest_int('num_heads', 2, 2)
         n_layers = trial.suggest_int('n_layers', 2, 2)
         dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
-        interaction_type = trial.suggest_int('interaction_type', 0, 2)
         optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW", "RMSprop", "SGD"])
 
         print('learning rate', learning_rate,
@@ -131,7 +130,6 @@ def objective(trial, args):
                 'num_heads', num_heads,
                 'n_layers', n_layers,
                 'dropout_rate', dropout_rate,
-                'interaction_type', interaction_type,
                 'optimizer', optimizer_name)
 
     else:

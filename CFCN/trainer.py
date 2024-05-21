@@ -135,10 +135,10 @@ def objective(trial, args):
         dropout_rate = args.dropout_rate
         optimizer_name = "Adam"
 
-    _, _, _, Y0, Y1 = generate_data(N=1000000, seed=seed, dataset=dataset, standardize=standardize)
+    _, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=seed, dataset=dataset, standardize=standardize)
     ATE = (Y1 - Y0).mean()  # ATE based off a large sample
 
-    all_data, DAG, var_types, Y0, Y1 = generate_data(N=sample_size, seed=seed, dataset=dataset)
+    all_data, DAG, var_types, var_names, Y0, Y1 = generate_data(N=sample_size, seed=seed, dataset=dataset)
 
     df = pd.DataFrame(all_data)
     df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)

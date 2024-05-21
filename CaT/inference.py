@@ -26,13 +26,13 @@ class CausalInference():
         '''
         self.model = model
         self.dag = self.model.nxdag
-        self.ordering = self.model.ordering
+        self.ordering = self.model.causal_ordering
         self.device = device
 
     def forward(self, data, intervention_nodes_vals=None):
         '''
         This function iterates through the causally-constrained attention according to the dag and a desired intervention
-        :param data is dataset (torch) to accompany the desired interventions (necessary for the variables which are not downstream of the intervention nodes). Assumed ordering is topological.
+        :param data is dataset (numpy) to accompany the desired interventions (necessary for the variables which are not downstream of the intervention nodes). Assumed ordering is topological.
         :param intervention_nodes_vals: dictionary of variable names as strings for intervention with corresponding intervention values
         :return: an updated dataset with new values including interventions and effects
         '''

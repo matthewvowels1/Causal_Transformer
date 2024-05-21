@@ -1,8 +1,14 @@
 import torch
 import numpy as np
 import networkx as nx
-import utils
+from utils import find_element_in_list
 from typing import Union
+
+
+def predict(model, data, device):
+    data = torch.from_numpy(data).float().to(device)
+    return model.forward(data)
+
 
 def remove_incoming_edges(graph, target_node='X'):
     """
@@ -30,99 +36,58 @@ def remove_incoming_edges(graph, target_node='X'):
     return modified_graph
 
 
-class CausalInference:
-    """
-    A template class for performing causal inference by modifying a specific variable 'X'
-    in the dataset and observing the changes in the model's predictions.
-    """
-    def __init__(self, dataset: Union[dict, np.ndarray], model: torch.nn.Module, device: Union[torch.device, str]):
-        """
-        Initializes the CausalInference class with a dataset and a model.
-
-        Args:
-            dataset (Union[dict, np.ndarray]): The dataset as a dictionary or numpy array.
-            model (nn.Module): The predictive model.
-            device (Union[torch.device, str]): The device on which to perform computations,
-                                                can be a torch-compatible type specifying CPU or GPU.
-        """
-        self.dataset = dataset
+class CausalInference():
+    def __init__(self, model, device):
+        '''
+        Using the CaT, this model iterates through the causally-constrained attention according to an intervention and some data
+        :param model: causal transformer CaT pytorch model
+        '''
         self.model = model
-        self.device = torch.device(device)
+        self.dag = self.model.nxdag
+        self.ordering = self.model.causal_ordering
+        self.device = device
 
-    def set_variable(self, var_name='X', value=1):
-        """
-        Sets a specific variable in the dataset to a given value.
+    def forward(self, data, intervention_nodes_vals=None):
+        '''
+        This function iterates through the causally-constrained attention according to the dag and a desired intervention
+        :param data is dataset (numpy) to accompany the desired interventions (necessary for the variables which are not downstream of the intervention nodes). Assumed ordering is topological.
+        :param intervention_nodes_vals: dictionary of variable names as strings for intervention with corresponding intervention values
+        :return: an updated dataset with new values including interventions and effects
+        '''
 
-        Args:
-            var_name (str): The name of the variable to modify.
-            value (int or float): The value to set the variable to.
+        if intervention_nodes_vals is not None:
+            D0 = data.copy()
 
-        Returns:
-            dict: A new dataset dictionary with the modified variable.
-        """
-        modified_dataset = {key: np.copy(val) if key != var_name else np.full_like(val, value) for key, val in self.dataset.items()}
-        return modified_dataset
+            # modify the dataset with the desired intervention values
+            for var_name in intervention_nodes_vals.keys():
+                val = intervention_nodes_vals[var_name]
+                index = find_element_in_list(list(self.dag.nodes()), var_name)
+                D0[:, index] = val
 
-    def predict(self, modified_dataset, batch_size=100, modify_masks=True):
-        """
-        Predicts outcomes using the model for a modified dataset.
+            # find all descendants of intervention variables which are not in intervention set
+            all_descs = []
+            for var in intervention_nodes_vals.keys():
+                all_descs.append(list(nx.descendants(self.dag, var)))
+            all_descs = [item for sublist in all_descs for item in sublist]
+            vars_to_update = set(all_descs) - set(intervention_nodes_vals.keys())
+            # get corresponding column indexes
+            indices_to_update = []
+            for var_name in vars_to_update:
+                indices_to_update.append(find_element_in_list(list(self.dag.nodes()), var_name)[0])
 
-        Args:
-            modified_dataset (dict): The dataset dictionary with modifications.
+            # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
+            min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
 
-        Returns:
-            np.array: The model's predictions.
-        """
+            for i, var in enumerate(list(self.dag.nodes())):
+                if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
+                    # generate predictions , updating the input dataset each time
+                    preds = predict(model=self.model, data=D0, device=self.device)[:, i]  # get prediction for each variable
+                    if i in indices_to_update:
+                        D0[:, i] = preds.detach().cpu().numpy()
+        else:
+            D0 = predict(model=self.model, data=data, device=self.device)
 
-        if modify_masks:
-            modified_dag = remove_incoming_edges(self.model.dag)
-            modified_adj_matrix = nx.to_numpy_array(modified_dag)
-
-            modified_masks = [torch.from_numpy(mask).float().to(torch.float64) for mask in
-                             utils.expand_adjacency_matrix(self.model.neurons_per_layer[1:], modified_adj_matrix)]
-
-
-            self.model.set_masks(modified_masks)
-
-        tensor_dataset = np.column_stack([modified_dataset[key] for key in sorted(modified_dataset.keys())])
-
-        # Convert numpy array to torch tensor
-        tensor_dataset = torch.tensor(tensor_dataset, dtype=torch.float32).to(self.device)
-
-        num_samples = tensor_dataset.size(0)
-        predictions = []
-
-        for start in range(0, num_samples, batch_size):
-            end = min(start + batch_size, num_samples)
-            batch = tensor_dataset[start:end]
-
-            # Model prediction for the current batch
-            batch_predictions = self.model(batch, shuffling=False)
-            predictions.append(batch_predictions)
-
-        # Concatenate all predictions into a single numpy array
-        return torch.cat(predictions).detach().cpu().numpy()
-
-    def infer_causal_effect(self, var_name='X', modify_masks=True):
-        """
-        Infers the causal effect of setting a variable 'X' to 0 and 1.
-
-        Args:
-            var_name (str): The name of the variable to test.
-
-        Returns:
-            tuple: A tuple containing two arrays (predictions when 'X' is 0, predictions when 'X' is 1).
-        """
-        # Set the variable 'X' to 0
-        dataset_x0 = self.set_variable(var_name, 0)
-        predictions_x0 = self.predict(dataset_x0, modify_masks=modify_masks)
-
-        # Set the variable 'X' to 1
-        dataset_x1 = self.set_variable(var_name, 1)
-        predictions_x1 = self.predict(dataset_x1, modify_masks=modify_masks)
-
-        return predictions_x0, predictions_x1
-
+        return D0
 
 
 

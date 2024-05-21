@@ -1,28 +1,14 @@
 # Causal_Transformer
 CaT - Causal Transformer
 
-TODO:
-- [DONE] Make DAG a networkx object
-- [DONE] Write function which tracks per variable loss
-- [DONE] plot per variable loss
-- [DONE] based on the networkX object, find topological ordering of the variables
-- [DONE] we need a variable type-based losses (e.g. BCE for binary vars, MSE for continuous vars) using the var_types variable
-- [DONE] Any variables with zero ordering can have their losses masked (can't predict something which has no parents)
-- [DONE] find a solution to deal with variables which have the same topological position in the causal ordering
-- [DONE] find a solution for intervening on multiple variables simultaneously (taking a list of intervention nodes)
-- [DONE] get the model to predict all positions in the causal ordering (as in a regular transformer)
-- [DONE] create a generate function which recursively predicts and feeds back into the model to generate predictions at any arbitrary position
-- [DONE] create a very simple dataset for validation
-- [DONE] turn into optuna objective
-- [DONE] if each row is independent, then can we shuffle the variable order and construct an adjacency matrix based on the parents of each variable in each sample in each batch?
-- [DONE] evaluate R2 to check convergence (not for final code)
-- IDEA: Train with full lower triangular + diagonal in 1st stage of training (to help gradient flow), then drop out links
-- Create testbed
-  - compute all causal effects for 'general' dataset in datasets.py 
-  - create a function for computing ATEs using CaT 
-  - check that they can be estimated reasonably well
-  - find application tasks / benchmarks (possibly robotics)
-  - run test suite and report results
+Update:
+
+layernorm in CaT : not sure!
+
+CFCN is working
+CaT is working
+
+TODO: Get recursive masking working for CFCN and CaT
 
 
 ## Example logic

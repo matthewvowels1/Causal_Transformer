@@ -13,7 +13,7 @@ class Swish(nn.Module):
 class MaskedLinear(nn.Module):
     """A linear layer with an optional mask applied to its weights."""
 
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(self, in_features: int, out_features: int, use_bias: bool):
         """
         Initializes the MaskedLinear layer.
 
@@ -22,10 +22,14 @@ class MaskedLinear(nn.Module):
             out_features (int): Number of output features.
         """
         super(MaskedLinear, self).__init__()
+        self.use_bias = use_bias
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features)).float()
-        self.bias = nn.Parameter(torch.zeros(out_features)).float()
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features), requires_grad=True).float()
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros(out_features), requires_grad=True).float()
+        else:
+            self.bias = 0.0
         self.mask = None
         self.reset_parameters()
 
@@ -52,8 +56,11 @@ class MaskedLinear(nn.Module):
     def reset_parameters(self):
         """Initializes or resets the weights and biases of the layer."""
         nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
-        #         self.weight.data.fill_(1.0)
-        self.bias.data.fill_(0.01)
+        # self.weight.data.fill_(1.0)
+        try:  # this only applies if a bias is actually used, but the use of bias is a hyperparameter
+            self.bias.data.fill_(0.01)
+        except:
+            pass
 
     def forward(self, input):
         if self.mask is not None:
@@ -85,7 +92,6 @@ class DAGAutoencoder(nn.Module):
         super(DAGAutoencoder, self).__init__()
         self.dag = dag
         self.orig_var_name_ordering = list(self.dag.nodes())
-        self.initial_adj_matrix = nx.to_numpy_array(self.dag)
         self.neurons_per_layer = neurons_per_layer
         self.layers = nn.ModuleList()
         self.dropout_rate = dropout_rate
@@ -93,14 +99,18 @@ class DAGAutoencoder(nn.Module):
         self.activations = nn.ModuleList()
         self.original_masks = []  # This will be set initially and not changed
         self.current_masks = []  # Masks currently being used by the layers
-        self.original_adj_matrix = torch.tensor(self.initial_adj_matrix,
+        self.original_adj_matrix = torch.tensor(nx.to_numpy_array(self.dag),
                                                 dtype=torch.float64)  # Store the original adjacency matrix
         self.dropout_layers = nn.ModuleList([nn.Dropout(p=self.dropout_rate) for _ in range(len(neurons_per_layer) - 1)])
         self.was_shuffled = False
         self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering)
 
         for i in range(len(self.neurons_per_layer) - 1):
-            linear_layer = MaskedLinear(neurons_per_layer[i], self.neurons_per_layer[i + 1])
+            if i == 0:  # don't use a bias parameter for the first layer
+                use_bias = False
+            else:
+                use_bias = True
+            linear_layer = MaskedLinear(neurons_per_layer[i], self.neurons_per_layer[i + 1], use_bias=use_bias)
             self.layers.append(linear_layer)
             if i < len(self.neurons_per_layer) - 2:
                 self.activations.append(Swish())
@@ -123,10 +133,12 @@ class DAGAutoencoder(nn.Module):
         Args:
             masks (List[torch.Tensor]): Masks to apply to the linear layers.
         """
+        self.current_masks = []
         # Apply masks only to linear layers
         assert len(masks) == len(self.layers), "The number of masks must match the number of linear layers."
         for layer, mask in zip(self.layers, masks):
             layer.set_mask(mask)
+            self.current_masks.append(mask)
 
     def forward(self, X: torch.Tensor, targets: Optional[torch.Tensor] = None, shuffling: bool = False) -> torch.Tensor:
         """
@@ -154,6 +166,7 @@ class DAGAutoencoder(nn.Module):
             self.was_shuffled = False
 
         for i, (linear, activation) in enumerate(zip(self.layers, self.activations)):
+
             X = linear(X)
             X = activation(X)
             X = self.dropout_layers[i](X)
@@ -162,7 +175,7 @@ class DAGAutoencoder(nn.Module):
         if targets is None:
             return X
         else:
-            loss, loss_tracker = self.loss_func(X, targets, shuffle_ordering)
+            loss, loss_tracker = self.loss_func(pred=X, target=targets, shuffle_ordering=shuffle_ordering)
             return X, loss, loss_tracker
 
 

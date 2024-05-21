@@ -9,6 +9,7 @@ from typing import Optional, Dict, List, Tuple, Union
 # 1. introduce dag into attention
 # 2. introduce diagonal after first layer
 # 3. handle skip connection masking issue
+# 4. not sure if layer norm is a good idea with sparse dags - TBC
 
 # note that the network has MHA with blocks in parallel, but this is also done sequentially, combining
 # both network width and network depth.
@@ -51,7 +52,7 @@ class Head(nn.Module):
 		K = self.key(X)  # B, T, hs
 		Q = self.query(X)  # B, T, hs
 		V = self.value(X)  # B, T, hs
-		B, T, HS = Q.shape
+		# B, T, HS = Q.shape
 		QK = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
 		self.att_wei = QK.masked_fill(self.dag_mod == 0, float('-inf'))
 		self.att_wei = F.softmax(self.att_wei, dim=-1)
@@ -62,6 +63,7 @@ class Head(nn.Module):
 		                           self.att_wei)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
 		out = self.att_wei.transpose(1, 2) @ V  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
 		out = self.act(out)
+
 		return out
 
 
@@ -140,11 +142,13 @@ class Block(nn.Module):
 		"""
 		Forward pass for the Block module.
 		"""
+		mha_out = self.mha(X)
+		# mha_out = self.ln1(mha_out)
+		ff_out = self.ff(mha_out)
 
-		mha_out = self.ln1(self.mha(X))
-
-		ff_out = self.ln2(self.ff(mha_out))
-		mha_out = self.ln3(mha_out + ff_out)
+		# ff_out = self.ln2(ff_out)
+		mha_out = mha_out + ff_out
+		# mha_out = self.ln3(mha_out)
 		return mha_out
 
 
@@ -197,11 +201,21 @@ class CaT(nn.Module):
 		self.ln = nn.LayerNorm(self.input_dim)
 
 		# Store original and setup DAG
-		self.original_dag = torch.tensor(dag, dtype=torch.float, device=device)
+		self.original_dag = dag.clone().detach()
 		self.eye = torch.eye(self.original_dag.size(0), device=device)
 		self.was_shuffled = False
 
+		def init_weights(m):
+			if isinstance(m, nn.Linear):
+				# nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
+				m.weight.data.fill_(1.0)
+				if m.bias is not None:
+					m.bias.data.fill_(0)
+
+		# Initialize each block and the rest of the model
 		self.initialize_blocks()
+		self.apply(init_weights)
+
 
 	def modify_dag(self, layer_index: int, dag: torch.Tensor) -> torch.Tensor:
 		"""
@@ -225,17 +239,17 @@ class CaT(nn.Module):
 		Initializes each layer/block with the appropriate DAG setup for the model.
 		"""
 		for i in range(self.n_layers):
-			current_dag = self.modify_dag(i, self.original_dag)
+			current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
 			self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
 			                         input_dim=self.input_dim, head_size=self.head_size,
 			                         dropout_rate=self.dropout_rate, dag=current_dag))
 
-	def reset_blocks(self) -> None:
+	def reset_dags(self) -> None:
 		"""
 		Resets the DAGs in all heads of all blocks to their original configurations.
 		"""
 		for i, block in enumerate(self.blocks):
-			original_dag = self.modify_dag(i, self.original_dag)
+			original_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
 			for head in block.mha.heads:
 				head.dag_mod = original_dag
 
@@ -268,12 +282,13 @@ class CaT(nn.Module):
 		else:
 			if self.was_shuffled:
 				# If the previous call used shuffling but this one does not, reset the DAGs
-				self.reset_blocks()
+				self.reset_dags()
 				self.was_shuffled = False  # Reset the shuffling flag as we have reverted to the original DAG
 			shuffle_ordering = np.arange(X.shape[1])
 
 		for block in self.blocks:
 			X = block(X)
+
 		X = self.lm_head(self.ln(X))
 
 		if targets is None:
@@ -282,19 +297,6 @@ class CaT(nn.Module):
 			loss, loss_tracker = self.loss_func(X, targets, shuffle_ordering)
 			return X, loss, loss_tracker
 
-
-def init_weights(m):
-	if isinstance(m, nn.Linear):
-		#         nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
-		m.weight.data.fill_(1)
-		# Check if the linear module has a bias term and set it to 1 if it exists
-		if m.bias is not None:
-			m.bias.data.fill_(0)
-
-
-def initialize_model_weights(model):
-	# Apply init_weights to all sub-modules of the model
-	model.apply(init_weights)
 
 
 class MixedLoss(nn.Module):

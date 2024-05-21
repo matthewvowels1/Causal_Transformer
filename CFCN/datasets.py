@@ -13,6 +13,57 @@ def inv_sigm(x):
 	return np.log(x / (1 - x))
 
 
+
+def reorder_dag(dag):
+	'''Takes a networkx digraph object and returns a topologically sorted graph.'''
+
+	assert nx.is_directed_acyclic_graph(dag), 'Graph needs to be acyclic.'
+
+	old_ordering = list(dag.nodes())  # get old ordering of nodes
+	adj_mat = nx.to_numpy_array(dag)  # get adjacency matrix of old graph
+
+	index_old = {v: i for i, v in enumerate(old_ordering)}
+	topological_ordering = list(nx.topological_sort(dag))  # get ideal topological ordering of nodes
+
+	permutation_vector = [index_old[v] for v in topological_ordering]  # get required permutation of old ordering
+
+	reordered_adj = adj_mat[np.ix_(permutation_vector, permutation_vector)]  # reorder old adj. mat
+
+	dag = nx.from_numpy_array(reordered_adj, create_using=nx.DiGraph)  # overwrite original dag
+
+	mapping = dict(zip(dag, topological_ordering))  # assign node names
+	dag = nx.relabel_nodes(dag, mapping)
+
+	return dag
+
+
+def get_full_ordering(DAG):
+	''' Note that the input DAG MUST be topologically sorted <before> using this function'''
+	ordering_info = {}
+	current_level = 0
+	var_names = list(DAG.nodes)
+
+	for i, var_name in enumerate(var_names):
+
+		if i == 0:  # if first in list
+			ordering_info[var_name] = 0
+
+		else:
+			# check if any parents
+			parent_list = list(DAG.predecessors(var_name))
+
+			# if no parents ()
+			if len(parent_list) == 0:
+				ordering_info[var_name] = current_level
+
+			elif len(parent_list) >= 1:  # if some parents, find most downstream parent and add 1 to ordering
+				for parent_var in parent_list:
+					parent_var_order = ordering_info[parent_var]
+					ordering_info[var_name] = parent_var_order + 1
+
+	return ordering_info
+
+
 def generate_data(N, seed, dataset, standardize=1):
 	'''
 	:param N: required sample size
@@ -172,6 +223,8 @@ def generate_data(N, seed, dataset, standardize=1):
 	else:
 		raise NotImplementedError
 
+	DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
+	causal_ordering = get_full_ordering(DAGnx)
 	var_names = list(DAGnx.nodes())  # topologically ordered list of variables
 	all_data = np.stack([all_data_dict[key] for key in var_names], axis=1)
 
@@ -180,4 +233,5 @@ def generate_data(N, seed, dataset, standardize=1):
 	nx.draw_networkx(DAGnx, pos, with_labels=True, arrows=True)
 	plt.savefig(f'{dataset}_graph.png')
 
-	return all_data, DAGnx, var_types, Y0, Y1
+
+	return all_data, DAGnx, var_types, var_names, Y0, Y1
