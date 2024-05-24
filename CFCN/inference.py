@@ -6,6 +6,7 @@ from typing import Union
 
 
 def predict(model, data, device):
+    model.eval()
     data = torch.from_numpy(data).float().to(device)
     return model.forward(data)
 
@@ -43,8 +44,8 @@ class CausalInference():
         :param model: causal transformer CaT pytorch model
         '''
         self.model = model
-        self.dag = self.model.nxdag
         self.ordering = self.model.causal_ordering
+        self.dag = self.model.dag
         self.device = device
 
     def forward(self, data, intervention_nodes_vals=None):
@@ -90,86 +91,3 @@ class CausalInference():
         return D0
 
 
-
-class CausalMetrics:
-    """
-    A class to compute causal inference metrics, specifically the error in the Average Treatment Effect (ATE)
-    and the error in the Precision in Estimation of Heterogeneous Effect (PEHE).
-
-    Attributes:
-        y0_true (np.array): Ground truth outcomes when X=0.
-        y1_true (np.array): Ground truth outcomes when X=1.
-        y0_pred (np.array): Predicted outcomes when X=0.
-        y1_pred (np.array): Predicted outcomes when X=1.
-    """
-
-    def __init__(self, y0_true, y1_true, y0_pred, y1_pred):
-        """
-        Initializes the CausalMetrics class with ground truth and predicted outcomes.
-
-        Args:
-            y0_true (np.array): Ground truth outcomes for Y0.
-            y1_true (np.array): Ground truth outcomes for Y1.
-            y0_pred (np.array): Predicted outcomes for Y0.
-            y1_pred (np.array): Predicted outcomes for Y1.
-        """
-        self.y0_true = np.array(y0_true)
-        self.y1_true = np.array(y1_true)
-        self.y0_pred = np.array(y0_pred)
-        self.y1_pred = np.array(y1_pred)
-
-        if self.y0_pred.shape != self.y0_true.shape:
-            raise ValueError("y0_pred must have the same dimensionality as y0_true")
-        if self.y1_pred.shape != self.y1_true.shape:
-            raise ValueError("y1_pred must have the same dimensionality as y1_true")
-
-    def calculate_ate(self):
-        """
-        Calculates the error in the Average Treatment Effect (ATE).
-
-        Returns:
-            float: The absolute error in the ATE estimate.
-        """
-        ate_pred = np.mean(self.y1_pred - self.y0_pred)
-        return ate_pred
-
-    def calculate_ate_error(self, true_ate=None):
-        """
-        Calculates the error in the Average Treatment Effect (ATE).
-
-        Returns:
-            float: The absolute error in the ATE estimate.
-        """
-        if true_ate is None:
-            true_ate = np.mean(self.y1_true - self.y0_true)
-        ate_pred = np.mean(self.y1_pred - self.y0_pred)
-        return np.abs(true_ate - ate_pred)
-
-    def calculate_pehe_error(self):
-        """
-        Calculates the error in the Precision in Estimation of Heterogeneous Effects (PEHE).
-
-        Returns:
-            float: The square root of the mean squared error of the individual treatment effect estimates.
-        """
-        ite_true = self.y1_true - self.y0_true
-        ite_pred = self.y1_pred - self.y0_pred
-        pehe = np.sqrt(np.mean((ite_true - ite_pred) ** 2))
-        return pehe
-
-    def evaluate_metrics(self):
-        """
-        Evaluates both ATE and PEHE errors and returns them.
-
-        Returns:
-            dict: A dictionary containing the ATE and PEHE errors.
-        """
-        ate_error = self.calculate_ate_error()
-        pehe_error = self.calculate_pehe_error()
-        return {'ATE Error': ate_error, 'PEHE Error': pehe_error}
-# get metrics
-#input = Y0, Y1, preds0, preds1
-
-# compute eATE
-
-# compute ePEHE

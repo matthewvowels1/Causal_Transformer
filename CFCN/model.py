@@ -13,7 +13,7 @@ class Swish(nn.Module):
 class MaskedLinear(nn.Module):
     """A linear layer with an optional mask applied to its weights."""
 
-    def __init__(self, in_features: int, out_features: int, use_bias: bool):
+    def __init__(self, in_features: int, out_features: int, use_bias: bool, device=None):
         """
         Initializes the MaskedLinear layer.
 
@@ -22,6 +22,7 @@ class MaskedLinear(nn.Module):
             out_features (int): Number of output features.
         """
         super(MaskedLinear, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.use_bias = use_bias
         self.in_features = in_features
         self.out_features = out_features
@@ -32,6 +33,7 @@ class MaskedLinear(nn.Module):
             self.bias = 0.0
         self.mask = None
         self.reset_parameters()
+        self.to(self.device)
 
     def set_mask(self, mask: Union[np.ndarray, torch.Tensor]):
         """
@@ -43,14 +45,14 @@ class MaskedLinear(nn.Module):
         """
         if isinstance(mask, np.ndarray):
             # Convert from NumPy array to Tensor and set the correct dtype
-            mask_tensor = torch.from_numpy(mask).float()
+            mask_tensor = torch.from_numpy(mask).float().to(self.device)
         elif isinstance(mask, torch.Tensor):
             # Ensure the tensor is the correct dtype
-            mask_tensor = mask.float()
+            mask_tensor = mask.float().to(self.device)
         else:
             raise TypeError("Mask must be a NumPy array or a PyTorch tensor.")
 
-        self.mask = nn.Parameter(mask_tensor, requires_grad=False)
+        self.mask = nn.Parameter(mask_tensor, requires_grad=False).to(self.device)
 
 
     def reset_parameters(self):
@@ -78,7 +80,7 @@ class DAGAutoencoder(nn.Module):
     """A directed acyclic graph (DAG) autoencoder with optional input shuffling."""
 
     def __init__(self, neurons_per_layer: List[int], dag: nx.DiGraph,
-                 var_types: Dict[str, str], dropout_rate: float = 0.5):
+                 var_types: Dict[str, str],  causal_ordering: Dict[str, int], dropout_rate: float=0.5, device=None):
         """
         Initializes the DAGAutoencoder with specified neuron layers, a graph representing the DAG,
         variable types, and a dropout rate.
@@ -90,9 +92,11 @@ class DAGAutoencoder(nn.Module):
             dropout_rate (float, optional): Probability of an element to be zeroed. Defaults to 0.5.
         """
         super(DAGAutoencoder, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.dag = dag
         self.orig_var_name_ordering = list(self.dag.nodes())
         self.neurons_per_layer = neurons_per_layer
+        self.causal_ordering = causal_ordering
         self.layers = nn.ModuleList()
         self.dropout_rate = dropout_rate
         self.var_types = var_types
@@ -110,10 +114,13 @@ class DAGAutoencoder(nn.Module):
                 use_bias = False
             else:
                 use_bias = True
-            linear_layer = MaskedLinear(neurons_per_layer[i], self.neurons_per_layer[i + 1], use_bias=use_bias)
+            linear_layer = MaskedLinear(neurons_per_layer[i], self.neurons_per_layer[i + 1], use_bias=use_bias,
+                                        device=self.device)
             self.layers.append(linear_layer)
             if i < len(self.neurons_per_layer) - 2:
                 self.activations.append(Swish())
+
+        self.to(self.device)
 
     def initialize_masks(self, masks: List[torch.Tensor]):
         """

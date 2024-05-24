@@ -30,20 +30,22 @@ class Head(nn.Module):
 	Implements a single attention head.
 	"""
 
-	def __init__(self, head_size: int, input_dim: int, dropout_rate: float, dag: torch.Tensor):
+	def __init__(self, head_size: int, input_dim: int, dropout_rate: float, dag: torch.Tensor, use_bias: bool, device=None):
 		super().__init__()
-		self.key = nn.Linear(input_dim, head_size, bias=False)
-		self.query = nn.Linear(input_dim, head_size, bias=False)
-		self.value = nn.Linear(input_dim, head_size, bias=False)
+		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
+		self.key = nn.Linear(input_dim, head_size, bias=use_bias)
+		self.query = nn.Linear(input_dim, head_size, bias=use_bias)
+		self.value = nn.Linear(input_dim, head_size, bias=use_bias)
 
 		self.head_size = head_size
 		# user a register buffer (not a module parameter) for the creation of self.dag
 		# dag will determine what variables can communicate with each other
-		self.dag_orig = dag
+		self.dag_orig = dag.to(self.device)
 		self.register_buffer('dag_mod', self.dag_orig)  # include transpose
 		self.dropout = nn.Dropout(dropout_rate)
 		self.act = Swish()
 		self.att_wei = None
+		self.to(self.device)
 
 	def forward(self, X: torch.Tensor) -> torch.Tensor:
 		"""
@@ -58,12 +60,11 @@ class Head(nn.Module):
 		self.att_wei = F.softmax(self.att_wei, dim=-1)
 		nan_rows = torch.any(torch.isnan(self.att_wei),
 		                     dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-		nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei)
+		nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei).to(self.device)
 		self.att_wei = torch.where(nan_mask, torch.zeros_like(self.att_wei),
 		                           self.att_wei)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
 		out = self.att_wei.transpose(1, 2) @ V  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
 		out = self.act(out)
-
 		return out
 
 
@@ -72,21 +73,28 @@ class MultiHeadAttention(nn.Module):
 	Implements multi-head attention combining several heads.
 	"""
 
-	def __init__(self, num_heads: int, input_dim: int, head_size: int, dropout_rate: float, dag: torch.Tensor):
+	def __init__(self, num_heads: int, input_dim: int, head_size: int, dropout_rate: float, dag: torch.Tensor, device=None):
 		super().__init__()
+
+		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
 		self.heads = nn.ModuleList(
-			[Head(head_size=head_size, input_dim=input_dim, dropout_rate=dropout_rate, dag=dag) for _ in
-			 range(num_heads)])
-		self.projection = nn.Linear(int(head_size * num_heads), input_dim)
+			[Head(head_size=head_size, input_dim=input_dim, dropout_rate=dropout_rate,
+			      dag=dag, use_bias=(i != 0), device=self.device)
+			 for i in range(num_heads)]
+		)
+
+		self.projection = nn.Linear(int(head_size * num_heads), input_dim, bias=True)
 		self.dropout = nn.Dropout(dropout_rate)
 		self.act = nn.LeakyReLU()
+		self.to(self.device)
 
 	def forward(self, X: torch.Tensor) -> torch.Tensor:
 		"""
 		Forward pass for the MultiHeadAttention module.
 		"""
 		out = torch.cat([h(X) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
-		out = self.dropout(self.projection(out))  # B, T, input_dim
+		out = self.projection(out)
+		out = self.dropout(out)  # B, T, input_dim
 		return self.act(out)
 
 
@@ -118,15 +126,15 @@ class Block(nn.Module):
 	"""
 
 	def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
-	             dag: torch.Tensor):
+	             dag: torch.Tensor, device=None):
 		super().__init__()
-
+		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
 		self.ff_n_embed = ff_n_embed
 		self.input_dim = input_dim
 		self.head_size = head_size
 		self.num_heads = num_heads
 		self.mha = MultiHeadAttention(num_heads=self.num_heads, input_dim=self.input_dim, head_size=self.head_size,
-		                              dropout_rate=dropout_rate, dag=dag)
+		                              dropout_rate=dropout_rate, dag=dag, device=self.device)
 		self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate)
 		if isinstance(dag, torch.Tensor):
 			dag = dag.clone().detach()
@@ -137,6 +145,7 @@ class Block(nn.Module):
 		self.ln1 = nn.LayerNorm(self.input_dim)
 		self.ln2 = nn.LayerNorm(self.input_dim)
 		self.ln3 = nn.LayerNorm(self.input_dim)
+		self.to(self.device)
 
 	def forward(self, X: torch.Tensor) -> torch.Tensor:
 		"""
@@ -164,7 +173,7 @@ class CaT(nn.Module):
 			dropout_rate: float,
 			var_types_sorted: Dict[str, str],
 			causal_ordering: Dict[str, int],
-			device: torch.device
+			device=None
 	):
 		'''
 		Initialize components of the Causal Transformer.
@@ -189,32 +198,33 @@ class CaT(nn.Module):
 		self.nxdag = dag
 		self.orig_var_name_ordering = list(self.nxdag.nodes())
 		dag = torch.tensor(nx.to_numpy_array(self.nxdag)).to(device)
-		self.device = device
+		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
 		self.n_layers = n_layers
 		self.dropout_rate = dropout_rate
 		self.causal_ordering = causal_ordering
 
 		self.blocks = nn.ModuleList()
 		self.loss_func = MixedLoss(var_types_sorted, orig_var_name_ordering=self.orig_var_name_ordering)
-		self.lm_head = nn.Linear(self.input_dim, self.input_dim)
+		self.lm_head = nn.Linear(self.input_dim, self.input_dim, bias=True)
 
 		self.ln = nn.LayerNorm(self.input_dim)
 
 		# Store original and setup DAG
 		self.original_dag = dag.clone().detach()
-		self.eye = torch.eye(self.original_dag.size(0), device=device)
+		self.eye = torch.eye(self.original_dag.size(0), device=self.device)
 		self.was_shuffled = False
 
 		def init_weights(m):
 			if isinstance(m, nn.Linear):
-				# nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
-				m.weight.data.fill_(1.0)
+				nn.init.kaiming_uniform_(m.weight, a=np.sqrt(5))
+				# m.weight.data.fill_(1.0)
 				if m.bias is not None:
-					m.bias.data.fill_(0)
+					m.bias.data.fill_(0.01)
 
 		# Initialize each block and the rest of the model
 		self.initialize_blocks()
 		self.apply(init_weights)
+		self.to(self.device)
 
 
 	def modify_dag(self, layer_index: int, dag: torch.Tensor) -> torch.Tensor:
@@ -242,7 +252,7 @@ class CaT(nn.Module):
 			current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
 			self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
 			                         input_dim=self.input_dim, head_size=self.head_size,
-			                         dropout_rate=self.dropout_rate, dag=current_dag))
+			                         dropout_rate=self.dropout_rate, dag=current_dag, device=self.device))
 
 	def reset_dags(self) -> None:
 		"""
@@ -289,7 +299,9 @@ class CaT(nn.Module):
 		for block in self.blocks:
 			X = block(X)
 
-		X = self.lm_head(self.ln(X))
+		# X = self.ln(X)
+
+		X = self.lm_head(X)
 
 		if targets is None:
 			return X

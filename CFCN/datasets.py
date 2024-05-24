@@ -234,4 +234,4 @@ def generate_data(N, seed, dataset, standardize=1):
 	plt.savefig(f'{dataset}_graph.png')
 
 
-	return all_data, DAGnx, var_types, var_names, Y0, Y1
+	return all_data, DAGnx, var_types, var_names, causal_ordering, Y0, Y1
