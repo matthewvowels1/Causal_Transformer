@@ -38,13 +38,13 @@ class CausalInference():
         '''
 
         if intervention_nodes_vals is not None:
-            D0 = data.copy()
+            Dprime = data.copy()
 
             # modify the dataset with the desired intervention values
             for var_name in intervention_nodes_vals.keys():
                 val = intervention_nodes_vals[var_name]
                 index = find_element_in_list(list(self.dag.nodes()), var_name)
-                D0[:, index] = val
+                Dprime[:, index] = val
 
             # find all descendants of intervention variables which are not in intervention set
             all_descs = []
@@ -63,13 +63,13 @@ class CausalInference():
             for i, var in enumerate(list(self.dag.nodes())):
                 if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
                     # generate predictions , updating the input dataset each time
-                    preds = predict(model=self.model, data=D0, device=self.device)[:, i]  # get prediction for each variable
+                    preds = predict(model=self.model, data=Dprime, device=self.device)[:, i]  # get prediction for each variable
                     if i in indices_to_update:
-                        D0[:, i] = preds.detach().cpu().numpy()
+                        Dprime[:, i] = preds.detach().cpu().numpy()
         else:
-            D0 = predict(model=self.model, data=data, device=self.device)
+            Dprime = predict(model=self.model, data=data, device=self.device)
 
-        return D0
+        return Dprime
 
 
 

@@ -16,7 +16,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dataset",
         type=str,
-        default='simple_test_v2',
+        default='simple_test_v3',
         required=True,
         help="Name of the dataset to be used for training and/or testing."
     )
@@ -151,12 +151,6 @@ if __name__ == '__main__':
         help="Percentage of data used for validation"
     )
 
-    parser.add_argument(
-        "--intervention_var",
-        type=int,
-        default=10,
-        help="List of variable names to perform an intervention and evaluate the causal effect."
-    )
 
     parser.add_argument(
         "--run_optuna",

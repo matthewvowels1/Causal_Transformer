@@ -63,7 +63,7 @@ def get_full_ordering(DAG):
 	return ordering_info
 
 
-def generate_data(N, seed, dataset, standardize=1):
+def generate_data(N, seed, dataset, standardize=0):
 	'''
 	:param N: required sample size
 	:param seed: random seed
@@ -154,90 +154,29 @@ def generate_data(N, seed, dataset, standardize=1):
 		                      ('Y', 'C')])
 
 
-	elif dataset == 'simple_test':
-		ux1 = np.random.randn(N, 1)
-		ux2 = np.random.randn(N, 1)
-		uy = np.random.randn(N, 1)
-
-		X = ux1
-		X2 = ux2
-		Y = 0.6 * X - 0.5 * X2  # + uy
-
-		if standardize:
-			X = (X - X.mean()) / X.std()
-			X2 = (X2 - X2.mean()) / X2.std()
-			Y = (Y - Y.mean()) / Y.std()
-
-		# outcomes:
-		Y1 = 0.6 - 0.5 * X2  # + uy
-		Y0 = -0.5 * X2  # + uy
-
-		X_1 = np.full((len(Y1) // 2, 1), 1)  # TODO: very simple test dataset  (to be removed)
-		X2_1 = np.full((len(Y1) // 2, 1), 2)
-		Y_1 = np.full((len(Y1) // 2, 1), 3)
-
-		X_2 = np.full((len(Y1) // 2, 1), 2)  # TODO: very simple test dataset  (to be removed)
-		X2_2 = np.full((len(Y1) // 2, 1), 4)
-		Y_2 = np.full((len(Y1) // 2, 1), 6)
-
-		X = np.concatenate((X_1, X_2), 0)
-		X2 = np.concatenate((X2_1, X2_2), 0)
-		Y = np.concatenate((Y_1, Y_2), 0)
-
-		all_data_dict = {'X': X, 'X2': X2, 'Y': Y}
-
-		# types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
-		var_types = {'X': 'cont', 'X2': 'cont', 'Y': 'cont'}
-
-		DAGnx.add_edges_from([('X', 'Y'), ('X2', 'Y')])
 
 	elif dataset == 'simple_test_v2':
-		data = np.zeros((N, 4, 5))
+		Ux = np.random.randn(N, 4)
+		X = Ux
 
-		for i in range(4):
-			data[:, i, :] = (i + 1)
+		Ub = np.random.randn(N, 4)
+		B = Ub
 
-		A = data[:, 0, :]
-		B = data[:, 1, :]
-		C = data[:, 2, :]
-		Y = data[:, 3, :]
+		Uc = np.random.randn(N, 4)
+		C = Uc
 
-		Y0 = Y
-		Y1 = Y
+		Uy = np.random.randn(N, 4)
+		Y = X + B + C + 0.1 * Uy
 
-		all_data_dict = {'A': A, 'B': B, 'C': C, 'Y': Y}
+		Y0 = B + C
+		Y1 = 1 + B + C
 
-		# types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
-		var_types = {'A': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}
-
-		#         DAGnx.add_edges_from([('A', 'B'), ('B', 'C'), ('C', 'Y')])
-		DAGnx.add_edges_from([('A', 'B'), ('C', 'B')])
-		DAGnx.add_node('C')
-		DAGnx.add_node('Y')
-
-	elif dataset == 'simple_test_v3':
-		data = np.zeros((N, 4, 1))
-
-		for i in range(4):
-			data[:, i, :] = (i + 1)
-
-		A = data[:, 0, :]
-		B = data[:, 1, :]
-		C = data[:, 2, :]
-		Y = data[:, 3, :]
-
-		Y0 = Y
-		Y1 = Y
-
-		all_data_dict = {'A': A, 'B': B, 'C': C, 'Y': Y}
+		all_data_dict = {'X': X, 'B': B, 'C': C, 'Y': Y}
 
 		# types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
-		var_types = {'A': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}
+		var_types = {'X': 'cont', 'B': 'cont', 'C': 'cont', 'Y': 'cont'}
 
-		#         DAGnx.add_edges_from([('A', 'B'), ('B', 'C'), ('C', 'Y')])
-		DAGnx.add_edges_from([('A', 'B'), ('C', 'B')])
-		DAGnx.add_node('C')
-		DAGnx.add_node('Y')
+		DAGnx.add_edges_from([('X', 'Y'), ('B', 'Y'), ('C', 'Y')])
 
 	else:
 		raise NotImplementedError
@@ -253,4 +192,4 @@ def generate_data(N, seed, dataset, standardize=1):
 
 	causal_ordering = get_full_ordering(DAGnx)
 
-	return all_data, DAGnx, causal_ordering, var_types, Y0, Y1
+	return all_data, DAGnx, var_names, causal_ordering, var_types, Y0, Y1

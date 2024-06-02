@@ -6,7 +6,7 @@ import numpy as np
 from datasets import generate_data
 import warnings
 from model import CaT
-
+import inference
 warnings.filterwarnings("ignore")
 
 
@@ -33,6 +33,7 @@ def plot_losses(loss_dict):
 
 def train(train_data, val_data, max_iters, eval_interval, eval_iters, device, model, batch_size, save_iter,
           model_save_path, optimizer, start_iter=None, checkpointing_on=0, shuffling=False):
+
     train_data, val_data = torch.from_numpy(train_data).float(),  torch.from_numpy(val_data).float()
 
     if start_iter == None:
@@ -119,7 +120,7 @@ def objective(trial, args):
     if args.run_optuna:
         # optuna parameters
         learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-2, log=True)
-        max_iters = trial.suggest_int('max_iters', 500, 40000)
+        max_iters = trial.suggest_int('max_iters', 500, 400000)
         num_heads = trial.suggest_int('num_heads', 2, 2)
         n_layers = trial.suggest_int('n_layers', 2, 2)
         dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
@@ -140,13 +141,12 @@ def objective(trial, args):
         dropout_rate = args.dropout_rate
         optimizer_name = "Adam"
 
-    _, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=seed, dataset=dataset, standardize=standardize)
-    ATE = (Y1 - Y0).mean()  # ATE based off a large sample
+    _, _, _, _, _, Y0, Y1 = generate_data(N=1000000, seed=seed, dataset=dataset, standardize=0)
+    ATE = (Y1 - Y0).mean(0)  # ATE based off a large sample
 
-    all_data, DAG, causal_ordering, var_types, Y0, Y1 = generate_data(N=sample_size, seed=seed, dataset=dataset)
+    all_data, DAGnx, var_names, causal_ordering, var_types, Y0, Y1 = generate_data(N=sample_size, seed=seed,
+                                                                                   dataset=dataset, standardize=0)
 
-    # df = pd.DataFrame(all_data)
-    # df.to_csv(os.path.join(fn, 'all_{}.csv'.format(dataset)), index=False)
 
     input_dim = all_data.shape[2]
     indices = np.arange(0, len(all_data))
@@ -165,7 +165,7 @@ def objective(trial, args):
                 head_size=head_size,
                 num_heads=num_heads,
                 ff_n_embed=ff_n_embed,
-                dag=DAG,
+                dag=DAGnx,
                 causal_ordering=causal_ordering,
                 n_layers=n_layers,
                 device=device,
@@ -200,7 +200,7 @@ def objective(trial, args):
         checkpoint_iter = checkpoint['iteration']
 
         if checkpoint_iter != max_iters:
-            train(rain_data=train_data,
+            train(train_data=train_data,
                       eval_iters=eval_iters,
                       val_data=val_data,
                       max_iters=max_iters,
@@ -218,57 +218,43 @@ def objective(trial, args):
 
     ######### check ATE (temporary code, to be generalised and integrated into testbed.py)########################
 
-    # ci_module = CausalInference(model, device=device)
-    # D_val = ci_module.forward(data=val_data, intervention_nodes_vals=None)
-    # D0 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_0)
-    # D1 = ci_module.forward(data=all_data, intervention_nodes_vals=intervention_nodes_vals_1)
-    # outcome_of_interest = 'Y'
-    # outcome_index = find_element_in_list(list(DAG.nodes()), outcome_of_interest)
-    # est_ATE = (D1[:, outcome_index] - D0[:, outcome_index]).mean()
-	#
-    # print('ATE results', est_ATE, ATE, abs(ATE-est_ATE))
-    # r2x = r2_score(val_data[:, 0], D_val[:, 0].detach().cpu().numpy())
-    # r2x1 = r2_score(val_data[:, 1], D_val[:, 1].detach().cpu().numpy())
-    # r2y = r2_score(val_data[:, 2], D_val[:, 2].detach().cpu().numpy())
-    # print('R2X:', r2x)
-    # print('R2X1:', r2x1)
-    # print('R2Y:', r2y)
-	#
-	#
-    # rdf = RandomForestRegressor()
-    # rdf.fit(train_data[:, :2], train_data[:, 2])
-    # preds = rdf.predict(val_data[:, :2])
-	#
-    # print('sanity check R2 with RDF:')
-    # r2y_rdf = r2_score(val_data[:, 2], preds)
-    # print('R2Y:', r2y_rdf)
-	#
-    # return r2y
+    model.eval()
+    inf = inference.CausalInference(model=model, device=device)
 
-    ############################################################################################################
+    int_nodes_vals0 = {'X': np.array([0.0, ])}
+    int_nodes_vals1 = {'X': np.array([1.0, ])}
+    effect_var = 'Y'
+    effect_index = var_names.index(effect_var)
 
-    # # view attention maps
-    # maps = []
-    # for j in range(n_layers):
-    # 	heads = model.blocks[j].mha.heads
-    # 	for i in range(args.num_heads):
-    # 		maps.append(heads[i].att_wei.mean(0).cpu().detach().numpy())
-    #
-    # maps = np.stack(maps).mean(0)
-    # fig, ax = plt.subplots()
-    # im = ax.imshow(maps, cmap='hot', interpolation='nearest')
-    # cbar = ax.figure.colorbar(im, ax=ax, shrink=1)
-    # # Setting the axis tick labels
-    # ax.set_xticks(np.arange(len(list(DAG.nodes))))
-    # ax.set_yticks(np.arange(len(list(DAG.nodes))))
-    #
-    # ax.set_xticklabels(list(DAG.nodes))
-    # ax.set_yticklabels(list(DAG.nodes))
-    #
-    # # Rotating the tick labels inorder to set their alignment.
-    # plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-    #          rotation_mode="anchor")
-    #
-    # fig.tight_layout()
-    # plt.savefig('attention_maps.png')
-    # plt.close()
+    preds0 = inf.forward(all_data, int_nodes_vals0)
+    preds1 = inf.forward(all_data, int_nodes_vals1)
+    ATE_pred = (preds1[:, effect_index, :] - preds0[:, effect_index, :]).mean(0)
+    eATE = np.abs(ATE_pred - ATE)
+    print('ATE:', ATE, 'est ATE:', ATE_pred, 'error:', eATE)
+
+
+    # view attention maps
+    maps = []
+    for j in range(n_layers):
+        heads = model.blocks[j].mha.heads
+        for i in range(args.num_heads):
+            maps.append(heads[i].att_wei.mean(0).cpu().detach().numpy())
+
+    maps = np.stack(maps).mean(0)
+    fig, ax = plt.subplots()
+    im = ax.imshow(maps, cmap='hot', interpolation='nearest')
+    cbar = ax.figure.colorbar(im, ax=ax, shrink=1)
+    # Setting the axis tick labels
+    ax.set_xticks(np.arange(len(list(DAGnx.nodes))))
+    ax.set_yticks(np.arange(len(list(DAGnx.nodes))))
+
+    ax.set_xticklabels(list(DAGnx.nodes))
+    ax.set_yticklabels(list(DAGnx.nodes))
+
+    # Rotating the tick labels inorder to set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+             rotation_mode="anchor")
+
+    fig.tight_layout()
+    plt.savefig('attention_maps.png')
+    plt.close()

@@ -3,13 +3,17 @@ CaT - Causal Transformer
 
 Update:
 
-layernorm in CaT : not sure!
+layernorm in CaT : Nope!
 
 CFCN is working
 CaT is working
 
-TODO: Get recursive masking working for CFCN and CaT
-
+TODO: Check mediated version DONE
+TODO: Add loss mask for exogenous variables DONE
+TODO: Talk about loss mask in paper
+TODO: Finalize tutorials
+TODO: Testbeds
+TODO: CFCN NOT WORKING?
 
 ## Example logic
 
