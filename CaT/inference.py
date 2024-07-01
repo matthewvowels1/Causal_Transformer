@@ -49,7 +49,8 @@ class CausalInference():
             # find all descendants of intervention variables which are not in intervention set
             all_descs = []
             for var in intervention_nodes_vals.keys():
-                all_descs.append(list(nx.descendants(self.dag, var)))
+                descs = list(nx.descendants(self.dag, var))
+                all_descs.append(descs)
             all_descs = [item for sublist in all_descs for item in sublist]
             vars_to_update = set(all_descs) - set(intervention_nodes_vals.keys())
             # get corresponding column indexes
@@ -59,7 +60,6 @@ class CausalInference():
 
             # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
             min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
-
             for i, var in enumerate(list(self.dag.nodes())):
                 if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
                     # generate predictions , updating the input dataset each time

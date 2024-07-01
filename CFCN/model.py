@@ -36,7 +36,6 @@ class MaskedLinear(nn.Module):
 		else:
 			self.bias = nn.Parameter(torch.zeros(out_features), requires_grad=False).float()
 
-
 		# after resetting parameters we have to make sure that the bias is set to zero
 		self.reset_parameters()
 		if not self.use_bias:
@@ -82,7 +81,7 @@ class DAGAutoencoder(nn.Module):
 	"""A directed acyclic graph (DAG) autoencoder with optional input shuffling."""
 
 	def __init__(self, neurons_per_layer: List[int], dag: nx.DiGraph,
-	             var_types_sorted: Dict[str, str], causal_ordering: Dict[str, int], dropout_rate: float = 0.5,
+	             var_types: Dict[str, str], causal_ordering: Dict[str, int], dropout_rate: float = 0.5,
 	             device=None):
 		"""
 		Initializes the DAGAutoencoder with specified neuron layers, a graph representing the DAG,
@@ -95,7 +94,7 @@ class DAGAutoencoder(nn.Module):
 			dropout_rate (float, optional): Probability of an element to be zeroed. Defaults to 0.5.
 		"""
 		super(DAGAutoencoder, self).__init__()
-		utils.assert_neuron_layers(layers=neurons_per_layer, input_size=len(var_types_sorted.keys()))
+		utils.assert_neuron_layers(layers=neurons_per_layer, input_size=len(var_types.keys()))
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
 		self.dag = dag
 		self.orig_var_name_ordering = list(self.dag.nodes())
@@ -103,7 +102,7 @@ class DAGAutoencoder(nn.Module):
 		self.causal_ordering = causal_ordering
 		self.layers = nn.ModuleList()
 		self.dropout_rate = dropout_rate
-		self.var_types_sorted = var_types_sorted
+		self.var_types = var_types
 		self.activations = nn.ModuleList()
 		self.original_masks = []  # This will be set initially and not changed
 		self.current_masks = []  # Masks currently being used by the layers
@@ -112,7 +111,7 @@ class DAGAutoencoder(nn.Module):
 		self.dropout_layers = nn.ModuleList(
 			[nn.Dropout(p=self.dropout_rate) for _ in range(len(neurons_per_layer) - 1)])
 		self.was_shuffled = False
-		self.loss_func = MixedLoss(self.var_types_sorted, orig_var_name_ordering=self.orig_var_name_ordering,
+		self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering,
 		                           causal_ordering=self.causal_ordering)
 
 		for i in range(len(self.neurons_per_layer) - 1):
@@ -194,7 +193,7 @@ class DAGAutoencoder(nn.Module):
 		if targets is None:
 			for i, var_name in enumerate(self.orig_var_name_ordering):
 
-				var_type = self.var_types_sorted[var_name]
+				var_type = self.var_types[var_name]
 				idx = shuffle_ordering[i]
 				if var_type == 'cont':
 					X[:, idx] = X[:, idx]
@@ -208,11 +207,11 @@ class DAGAutoencoder(nn.Module):
 
 
 class MixedLoss(nn.Module):
-	def __init__(self, var_types_sorted, orig_var_name_ordering, causal_ordering):
+	def __init__(self, var_types, orig_var_name_ordering, causal_ordering):
 		super(MixedLoss, self).__init__()
 		self.causal_ordering = causal_ordering
 		self.orig_var_name_ordering = orig_var_name_ordering
-		self.var_types_sorted = var_types_sorted  # sorted types for determining which loss to use
+		self.var_types = var_types  # sorted types for determining which loss to use
 		self.cont_loss = nn.MSELoss()  # Loss for continuous variables
 		self.bin_loss = nn.BCEWithLogitsLoss()  # Loss for binary variables
 
@@ -227,7 +226,7 @@ class MixedLoss(nn.Module):
 
 			if self.causal_ordering[var_name] != 0:  # don't compute loss for exogenous vars
 
-				var_type = self.var_types_sorted[var_name]
+				var_type = self.var_types[var_name]
 				idx = shuffle_ordering[i]
 
 				if var_type == 'cont':

@@ -68,7 +68,8 @@ class CausalInference():
             # find all descendants of intervention variables which are not in intervention set
             all_descs = []
             for var in intervention_nodes_vals.keys():
-                all_descs.append(list(nx.descendants(self.dag, var)))
+                descs = list(nx.descendants(self.dag, var))
+                all_descs.append(descs)
             all_descs = [item for sublist in all_descs for item in sublist]
 
             vars_to_update = set(all_descs) - set(intervention_nodes_vals.keys())

@@ -6,10 +6,11 @@ import numpy as np
 from typing import Optional, Dict, List, Tuple, Union
 
 
-# 1. introduce dag into attention
-# 2. introduce diagonal after first layer
-# 3. handle skip connection masking issue
-# 4. not sure if layer norm is a good idea with sparse dags - TBC
+# 1. introduce dag into attention [DONE]
+# 2. introduce diagonal after first layer [DONE]
+# 3. handle skip connection masking issue [DONE]
+# 4. layer norm not good [DONE]
+# 5. introduce a linear combination layer which still respects the mask [DONE]
 
 # note that the network has MHA with blocks in parallel, but this is also done sequentially, combining
 # both network width and network depth.
@@ -40,32 +41,65 @@ class Head(nn.Module):
         self.head_size = head_size
         # user a register buffer (not a module parameter) for the creation of self.dag
         # dag will determine what variables can communicate with each other
-        self.dag_orig = dag.to(self.device)
+        self.dag_orig = dag.to(self.device).float()
         self.register_buffer('dag_mod', self.dag_orig)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)
         self.act = Swish()
-        self.att_wei = None
+        self.S = None
         self.to(self.device)
+
+    # def forward(self, X: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     Forward pass for the Head module.
+    #     """
+    #     K = self.act(self.key(X))  # B, T, hs
+    #     Q = self.act(self.query(X))  # B, T, hs
+    #     V = self.act(self.value(X))  # B, T, hs
+    #     # B, T, HS = Q.shape
+    #     QK = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
+	#
+    #     self.att_wei = QK.masked_fill(self.dag_mod == 0, 0.0)
+	#
+    #     self.att_wei = QK.masked_fill(self.dag_mod == 0, float('-inf'))
+    #     self.att_wei = F.softmax(self.att_wei, dim=-1)
+    #     nan_rows = torch.any(torch.isnan(self.att_wei), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
+    #     nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei).to(self.device)
+    #     self.Sprime = torch.where(nan_mask, torch.zeros_like(self.att_wei),
+    #                                self.att_wei)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+	#
+    #     Vadd = self.dag_mod.T @ V
+    #     O = self.att_wei.transpose(1, 2) @ V  + Vadd  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+    #     O = self.act(O)
+	#
+    #     return O
+    #
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for the Head module.
         """
-        K = self.key(X)  # B, T, hs
-        Q = self.query(X)  # B, T, hs
-        V = self.value(X)  # B, T, hs
+        K = self.act(self.key(X))  # B, T, hs
+        Q = self.act(self.query(X))  # B, T, hs
+        V = self.act(self.value(X))  # B, T, hs
         # B, T, HS = Q.shape
-        QK = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
-        self.att_wei = QK.masked_fill(self.dag_mod == 0, float('-inf'))
-        self.att_wei = F.softmax(self.att_wei, dim=-1)
-        nan_rows = torch.any(torch.isnan(self.att_wei),
-                             dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-        nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei).to(self.device)
-        self.att_wei = torch.where(nan_mask, torch.zeros_like(self.att_wei),
-                                   self.att_wei)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-        out = self.att_wei.transpose(1, 2) @ V  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
-        out = self.act(out)
-        return out
+        S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
+
+        self.Sprime = self.dag_mod.T @ S_qk
+
+        self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
+
+        self.Sprime = F.softmax(self.Sprime, dim=-1)
+        nan_rows = torch.any(torch.isnan(self.Sprime), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
+        nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
+        self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
+                                   self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+
+        Vprime = self.dag_mod.T @ V
+        O = self.Sprime.transpose(1, 2) @ V  + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+        O = self.act(O)
+
+        return O
+
 
 
 class MultiHeadAttention(nn.Module):
@@ -73,19 +107,20 @@ class MultiHeadAttention(nn.Module):
     Implements multi-head attention combining several heads.
     """
 
-    def __init__(self, num_heads: int, input_dim: int, head_size: int, dropout_rate: float, dag: torch.Tensor, device=None):
+    def __init__(self, num_heads: int, input_dim: int, head_size: int, dropout_rate: float, dag: torch.Tensor,
+                 use_bias: bool = False, device: Optional[torch.device] = None):
         super().__init__()
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.heads = nn.ModuleList(
             [Head(head_size=head_size, input_dim=input_dim, dropout_rate=dropout_rate,
-                  dag=dag, use_bias=(i != 0), device=self.device)
-             for i in range(num_heads)]
+                  dag=dag, use_bias=use_bias, device=self.device)
+                for i in range(num_heads)]
         )
 
         self.projection = nn.Linear(int(head_size * num_heads), input_dim, bias=True)
         self.dropout = nn.Dropout(dropout_rate)
-        self.act = nn.LeakyReLU()
+        self.act = Swish()
         self.to(self.device)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -107,7 +142,7 @@ class FF(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, ff_n_embed),
-            nn.ReLU(),
+            Swish(),
             nn.Linear(ff_n_embed, input_dim),
             nn.Dropout(dropout_rate),
         )
@@ -126,7 +161,7 @@ class Block(nn.Module):
     """
 
     def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
-                 dag: torch.Tensor, device=None):
+                 dag: torch.Tensor, use_bias: bool = False, device: Optional[torch.device] = None):
         super().__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.ff_n_embed = ff_n_embed
@@ -134,17 +169,13 @@ class Block(nn.Module):
         self.head_size = head_size
         self.num_heads = num_heads
         self.mha = MultiHeadAttention(num_heads=self.num_heads, input_dim=self.input_dim, head_size=self.head_size,
-                                      dropout_rate=dropout_rate, dag=dag, device=self.device)
+                                      dropout_rate=dropout_rate, dag=dag, use_bias=use_bias, device=self.device)
         self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate)
         if isinstance(dag, torch.Tensor):
             dag = dag.clone().detach()
         else:
             dag = torch.tensor(dag, dtype=torch.float)  # Only convert to tensor if not already one
         self.register_buffer('dag_mask', dag.unsqueeze(0))  # Adding batch dimension
-
-        self.ln1 = nn.LayerNorm(self.input_dim)
-        self.ln2 = nn.LayerNorm(self.input_dim)
-        self.ln3 = nn.LayerNorm(self.input_dim)
         self.to(self.device)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -152,12 +183,9 @@ class Block(nn.Module):
         Forward pass for the Block module.
         """
         mha_out = self.mha(X)
-        # mha_out = self.ln1(mha_out)
         ff_out = self.ff(mha_out)
-
-        # ff_out = self.ln2(ff_out)
         mha_out = mha_out + ff_out
-        # mha_out = self.ln3(mha_out)
+
         return mha_out
 
 
@@ -171,7 +199,7 @@ class CaT(nn.Module):
             n_layers: int,
             dag: nx.DiGraph,
             dropout_rate: float,
-            var_types_sorted: Dict[str, str],
+            var_types: Dict[str, str],
             causal_ordering: Dict[str, int],
             device=None
     ):
@@ -186,7 +214,7 @@ class CaT(nn.Module):
             n_layers (int): Number of layers in the network.
             dag (networkx.DiGraph): Topologically sorted directed acyclic graph.
             dropout_rate (float): Dropout rate to use within attention and feedforward layers.
-            var_types_sorted (dict): Dictionary specifying the variable types ('bin', 'cont', 'cat').
+            var_types(dict): Dictionary specifying the variable types ('bin', 'cont', 'cat').
             causal_ordering (dict): Ordering of variables for causal relationships.
             device (torch.device): The device the model should use.
         '''
@@ -202,14 +230,12 @@ class CaT(nn.Module):
         self.n_layers = n_layers
         self.dropout_rate = dropout_rate
         self.causal_ordering = causal_ordering
-        self.var_types_sorted = var_types_sorted
+        self.var_types = var_types
 
         self.blocks = nn.ModuleList()
-        self.loss_func = MixedLoss(self.var_types_sorted, orig_var_name_ordering=self.orig_var_name_ordering,
+        self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering,
                                    causal_ordering=self.causal_ordering)
         self.lm_head = nn.Linear(self.input_dim, self.input_dim, bias=True)
-
-        self.ln = nn.LayerNorm(self.input_dim)
 
         # Store original and setup DAG
         self.original_dag = dag.clone().detach()
@@ -254,7 +280,7 @@ class CaT(nn.Module):
             current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
             self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
                                      input_dim=self.input_dim, head_size=self.head_size,
-                                     dropout_rate=self.dropout_rate, dag=current_dag, device=self.device))
+                                     dropout_rate=self.dropout_rate, use_bias=(i >= 1), dag=current_dag, device=self.device))
 
     def reset_dags(self) -> None:
         """
@@ -301,14 +327,12 @@ class CaT(nn.Module):
         for block in self.blocks:
             X = block(X)
 
-        # X = self.ln(X)
-
         X = self.lm_head(X)
 
         if targets is None:
             for i, var_name in enumerate(self.orig_var_name_ordering):
 
-                var_type = self.var_types_sorted[var_name]
+                var_type = self.var_types[var_name]
                 idx = shuffle_ordering[i]
                 if var_type == 'cont':
                     X[:, idx] = X[:, idx]
@@ -322,11 +346,11 @@ class CaT(nn.Module):
 
 
 class MixedLoss(nn.Module):
-    def __init__(self, var_types_sorted, orig_var_name_ordering, causal_ordering):
+    def __init__(self, var_types, orig_var_name_ordering, causal_ordering):
         super(MixedLoss, self).__init__()
         self.causal_ordering = causal_ordering
         self.orig_var_name_ordering = orig_var_name_ordering
-        self.var_types_sorted = var_types_sorted  # sorted types for determining which loss to use
+        self.var_types = var_types  # sorted types for determining which loss to use
         self.cont_loss = nn.MSELoss()  # Loss for continuous variables
         self.bin_loss = nn.BCEWithLogitsLoss()  # Loss for binary variables
 
@@ -339,7 +363,7 @@ class MixedLoss(nn.Module):
 
         for i, var_name in enumerate(self.orig_var_name_ordering):
             if self.causal_ordering[var_name] != 0:  # don't compute loss for exogenous vars
-                var_type = self.var_types_sorted[var_name]
+                var_type = self.var_types[var_name]
                 idx = shuffle_ordering[i]
 
                 if var_type == 'cont':

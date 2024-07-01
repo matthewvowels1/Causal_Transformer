@@ -1,7 +1,16 @@
 # Causal_Transformer
 CaT - Causal Transformer
 
-Update:
+# update 28.6.24
+Layernorm may be ok if we constrain the dimensions over which the normalization is undertaken
+
+I have tested the CFCN and it works under all graphs currently in the tutorial scripts.
+TODO: do the misspecification simulation on CFCN
+
+
+
+
+# Update 21.6.24:
 
 layernorm in CaT : Nope!
 
