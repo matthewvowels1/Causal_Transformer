@@ -78,6 +78,7 @@ class Head(nn.Module):
         """
         Forward pass for the Head module.
         """
+        print(X.shape)
         K = self.act(self.key(X))  # B, T, hs
         Q = self.act(self.query(X))  # B, T, hs
         V = self.act(self.value(X))  # B, T, hs
@@ -95,7 +96,7 @@ class Head(nn.Module):
                                    self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
 
         Vprime = self.dag_mod.T @ V
-        O = self.Sprime.transpose(1, 2) @ V  + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+        O = self.Sprime.transpose(1, 2) @ V + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
         O = self.act(O)
 
         return O
