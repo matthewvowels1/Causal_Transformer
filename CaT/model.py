@@ -45,47 +45,22 @@ class Head(nn.Module):
         self.register_buffer('dag_mod', self.dag_orig)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)
         self.act = Swish()
-        self.S = None
         self.to(self.device)
 
-    # def forward(self, X: torch.Tensor) -> torch.Tensor:
-    #     """
-    #     Forward pass for the Head module.
-    #     """
-    #     K = self.act(self.key(X))  # B, T, hs
-    #     Q = self.act(self.query(X))  # B, T, hs
-    #     V = self.act(self.value(X))  # B, T, hs
-    #     # B, T, HS = Q.shape
-    #     QK = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
-	#
-    #     self.att_wei = QK.masked_fill(self.dag_mod == 0, 0.0)
-	#
-    #     self.att_wei = QK.masked_fill(self.dag_mod == 0, float('-inf'))
-    #     self.att_wei = F.softmax(self.att_wei, dim=-1)
-    #     nan_rows = torch.any(torch.isnan(self.att_wei), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-    #     nan_mask = nan_rows.unsqueeze(-1).expand_as(self.att_wei).to(self.device)
-    #     self.Sprime = torch.where(nan_mask, torch.zeros_like(self.att_wei),
-    #                                self.att_wei)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-	#
-    #     Vadd = self.dag_mod.T @ V
-    #     O = self.att_wei.transpose(1, 2) @ V  + Vadd  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
-    #     O = self.act(O)
-	#
-    #     return O
-    #
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for the Head module.
         """
-        print(X.shape)
+
         K = self.act(self.key(X))  # B, T, hs
         Q = self.act(self.query(X))  # B, T, hs
         V = self.act(self.value(X))  # B, T, hs
+
         # B, T, HS = Q.shape
         S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
 
-        self.Sprime = self.dag_mod.T @ S_qk
+        self.Sprime = self.dag_mod.T * (self.dag_mod.T @ S_qk)
 
         self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
 
@@ -96,9 +71,7 @@ class Head(nn.Module):
                                    self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
 
         Vprime = self.dag_mod.T @ V
-        O = self.Sprime.transpose(1, 2) @ V + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
-        O = self.act(O)
-
+        O = self.Sprime @ V + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
         return O
 
 
@@ -131,7 +104,8 @@ class MultiHeadAttention(nn.Module):
         out = torch.cat([h(X) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
         out = self.projection(out)
         out = self.dropout(out)  # B, T, input_dim
-        return self.act(out)
+        out = self.act(out)
+        return out
 
 
 class FF(nn.Module):
@@ -186,7 +160,6 @@ class Block(nn.Module):
         mha_out = self.mha(X)
         ff_out = self.ff(mha_out)
         mha_out = mha_out + ff_out
-
         return mha_out
 
 
@@ -281,7 +254,7 @@ class CaT(nn.Module):
             current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
             self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
                                      input_dim=self.input_dim, head_size=self.head_size,
-                                     dropout_rate=self.dropout_rate, use_bias=(i >= 1), dag=current_dag, device=self.device))
+                                     dropout_rate=self.dropout_rate,  use_bias=(i >= 1), dag=current_dag, device=self.device))
 
     def reset_dags(self) -> None:
         """
