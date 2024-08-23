@@ -254,7 +254,7 @@ class CaT(nn.Module):
             current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
             self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
                                      input_dim=self.input_dim, head_size=self.head_size,
-                                     dropout_rate=self.dropout_rate,  use_bias=(i >= 1), dag=current_dag, device=self.device))
+                                     dropout_rate=self.dropout_rate,  use_bias=True, dag=current_dag, device=self.device))  #use_bias=(i >= 1), dag=current_dag, device=self.device))
 
     def reset_dags(self) -> None:
         """
