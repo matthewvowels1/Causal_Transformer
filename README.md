@@ -1,6 +1,16 @@
 # Causal_Transformer
 CaT - Causal Transformer
 
+# idea for evaluation:
+
+https://arxiv.org/pdf/2405.17151
+
+- show that layer norm messes things up
+- consider causal MNIST
+- 
+
+
+
 # update 28.6.24
 Layernorm may be ok if we constrain the dimensions over which the normalization is undertaken
 

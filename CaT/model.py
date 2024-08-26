@@ -20,9 +20,31 @@ from typing import Optional, Dict, List, Tuple, Union
 # from A <after the first layer>, because B is caused by A, not by itself. So the diagonal of ones should be
 # introduced after the first layer.
 
-class Swish(nn.Module):
+class SwishAct(nn.SiLU):
+    def __init__(self):
+        super(SwishAct, self).__init__()
+
+
+class MishAct(nn.Mish):
+    def __init__(self):
+        super(MishAct, self).__init__()
+
+class LeakyReLUAct(nn.LeakyReLU):
+    def __init__(self):
+        super(LeakyReLUAct, self).__init__()
+
+class TanhAct(nn.Module):
     def forward(self, x):
-        return x * torch.sigmoid(x)
+        return x * torch.tanh(x)
+
+
+class ReLUAct(nn.Module):
+    def forward(self, x):
+        return x * torch.relu(x)
+
+class IdentAct(nn.Module):
+    def forward(self, x):
+        return x
 
 
 # adapted from example GPT code  https://github.com/karpathy/ng-video-lecture
@@ -31,12 +53,15 @@ class Head(nn.Module):
     Implements a single attention head.
     """
 
-    def __init__(self, head_size: int, input_dim: int, dropout_rate: float, dag: torch.Tensor, use_bias: bool, device=None):
+    def __init__(self, head_size: int, input_dim: int, dropout_rate: float, dag: torch.Tensor, use_bias: bool,
+                 activation_function: str ='Swish', device=None):
         super().__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.key = nn.Linear(input_dim, head_size, bias=use_bias)
         self.query = nn.Linear(input_dim, head_size, bias=use_bias)
         self.value = nn.Linear(input_dim, head_size, bias=use_bias)
+
+        self.activation_function = activation_function
 
         self.head_size = head_size
         # user a register buffer (not a module parameter) for the creation of self.dag
@@ -44,7 +69,18 @@ class Head(nn.Module):
         self.dag_orig = dag.to(self.device).float()
         self.register_buffer('dag_mod', self.dag_orig)  # include transpose
         self.dropout = nn.Dropout(dropout_rate)
-        self.act = Swish()
+
+        activation_map = {
+            'Swish': SwishAct(),
+            'ReLU': ReLUAct(),
+            'tanh': TanhAct(),
+            'Ident': IdentAct(),
+            'Mish': MishAct(),
+            'LeakyReLU': LeakyReLUAct(),
+        }
+
+        self.act = activation_map.get(self.activation_function, None)
+
         self.to(self.device)
 
 
@@ -53,26 +89,24 @@ class Head(nn.Module):
         Forward pass for the Head module.
         """
 
-        K = self.act(self.key(X))  # B, T, hs
-        Q = self.act(self.query(X))  # B, T, hs
+        # K = self.act(self.key(X))  # B, T, hs
+        # Q = self.act(self.query(X))  # B, T, hs
         V = self.act(self.value(X))  # B, T, hs
-
-        # B, T, HS = Q.shape
-        S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
-
-        self.Sprime = self.dag_mod.T * (self.dag_mod.T @ S_qk)
-
-        self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
-
-        self.Sprime = F.softmax(self.Sprime, dim=-1)
-        nan_rows = torch.any(torch.isnan(self.Sprime), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-        nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
-        self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
-                                   self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-
+        #
+        # # B, T, HS = Q.shape
+        # S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
+        #
+        # self.Sprime = self.dag_mod.T * (self.dag_mod.T @ S_qk)
+        # self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
+        # self.Sprime = F.softmax(self.Sprime, dim=-1)
+        # nan_rows = torch.any(torch.isnan(self.Sprime), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
+        # nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
+        # self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
+        #                            self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+        #
         Vprime = self.dag_mod.T @ V
-        O = self.Sprime @ V + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
-        return O
+        # O = self.Sprime @ V + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+        return Vprime
 
 
 
@@ -82,19 +116,30 @@ class MultiHeadAttention(nn.Module):
     """
 
     def __init__(self, num_heads: int, input_dim: int, head_size: int, dropout_rate: float, dag: torch.Tensor,
-                 use_bias: bool = False, device: Optional[torch.device] = None):
+                 use_bias: bool = False, activation_function: str = 'Swish', device: Optional[torch.device] = None):
         super().__init__()
+
+        self.activation_function = activation_function
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.heads = nn.ModuleList(
             [Head(head_size=head_size, input_dim=input_dim, dropout_rate=dropout_rate,
-                  dag=dag, use_bias=use_bias, device=self.device)
+                  dag=dag, use_bias=use_bias, device=self.device, activation_function=self.activation_function)
                 for i in range(num_heads)]
         )
 
         self.projection = nn.Linear(int(head_size * num_heads), input_dim, bias=True)
         self.dropout = nn.Dropout(dropout_rate)
-        self.act = Swish()
+        activation_map = {
+            'Swish': SwishAct(),
+            'ReLU': ReLUAct(),
+            'tanh': TanhAct(),
+            'Ident': IdentAct(),
+            'Mish': MishAct(),
+            'LeakyReLU': LeakyReLUAct(),
+        }
+
+        self.act = activation_map.get(self.activation_function, None)
         self.to(self.device)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -113,11 +158,26 @@ class FF(nn.Module):
     Implements a feedforward neural network.
     """
 
-    def __init__(self, input_dim: int, ff_n_embed: int, dropout_rate: float):
+    def __init__(self, input_dim: int, ff_n_embed: int, dropout_rate: float, activation_function: str = 'Swish'):
         super().__init__()
+
+        self.activation_function = activation_function
+
+        self.dropout = nn.Dropout(dropout_rate)
+        activation_map = {
+            'Swish': SwishAct(),
+            'ReLU': ReLUAct(),
+            'tanh': TanhAct(),
+            'Ident': IdentAct(),
+            'Mish': MishAct(),
+            'LeakyReLU': LeakyReLUAct(),
+        }
+
+        self.act = activation_map.get(self.activation_function, None)
+
         self.net = nn.Sequential(
             nn.Linear(input_dim, ff_n_embed),
-            Swish(),
+            self.act,
             nn.Linear(ff_n_embed, input_dim),
             nn.Dropout(dropout_rate),
         )
@@ -136,16 +196,21 @@ class Block(nn.Module):
     """
 
     def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
-                 dag: torch.Tensor, use_bias: bool = False, device: Optional[torch.device] = None):
+                 dag: torch.Tensor, use_bias: bool = False, device: Optional[torch.device] = None,
+                 activation_function: str = 'Swish'):
         super().__init__()
+        self.activation_function = activation_function
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.ff_n_embed = ff_n_embed
         self.input_dim = input_dim
         self.head_size = head_size
         self.num_heads = num_heads
         self.mha = MultiHeadAttention(num_heads=self.num_heads, input_dim=self.input_dim, head_size=self.head_size,
-                                      dropout_rate=dropout_rate, dag=dag, use_bias=use_bias, device=self.device)
-        self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate)
+                                      dropout_rate=dropout_rate, dag=dag, use_bias=use_bias, device=self.device,
+                                      activation_function=self.activation_function)
+        self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate,
+                     activation_function=self.activation_function)
+
         if isinstance(dag, torch.Tensor):
             dag = dag.clone().detach()
         else:
@@ -175,7 +240,8 @@ class CaT(nn.Module):
             dropout_rate: float,
             var_types: Dict[str, str],
             causal_ordering: Dict[str, int],
-            device=None
+            device=None,
+            activation_function='Swish'
     ):
         '''
         Initialize components of the Causal Transformer.
@@ -191,6 +257,7 @@ class CaT(nn.Module):
             var_types(dict): Dictionary specifying the variable types ('bin', 'cont', 'cat').
             causal_ordering (dict): Ordering of variables for causal relationships.
             device (torch.device): The device the model should use.
+            activation_function (str): 'Swish', 'ReLU', or 'tanh'
         '''
         super().__init__()
         self.input_dim = input_dim
@@ -205,11 +272,14 @@ class CaT(nn.Module):
         self.dropout_rate = dropout_rate
         self.causal_ordering = causal_ordering
         self.var_types = var_types
+        self.activation_function = activation_function
 
-        self.blocks = nn.ModuleList()
+        self.blocks = nn.ModuleList()   # main bulk of network
+        self.lm_head = nn.Linear(self.input_dim, self.input_dim, bias=True)  # very last dense layer
+
+        # loss stuff
         self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering,
                                    causal_ordering=self.causal_ordering)
-        self.lm_head = nn.Linear(self.input_dim, self.input_dim, bias=True)
 
         # Store original and setup DAG
         self.original_dag = dag.clone().detach()
@@ -218,8 +288,7 @@ class CaT(nn.Module):
 
         def init_weights(m):
             if isinstance(m, nn.Linear):
-                nn.init.kaiming_uniform_(m.weight, a=np.sqrt(5))
-                # m.weight.data.fill_(1.0)
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     m.bias.data.fill_(0.01)
 
@@ -254,7 +323,8 @@ class CaT(nn.Module):
             current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
             self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
                                      input_dim=self.input_dim, head_size=self.head_size,
-                                     dropout_rate=self.dropout_rate,  use_bias=True, dag=current_dag, device=self.device))  #use_bias=(i >= 1), dag=current_dag, device=self.device))
+                                     dropout_rate=self.dropout_rate,  use_bias=True, dag=current_dag,
+                                     device=self.device, activation_function=self.activation_function))  #use_bias=(i >= 1), dag=current_dag, device=self.device))
 
     def reset_dags(self) -> None:
         """
@@ -311,6 +381,7 @@ class CaT(nn.Module):
                 if var_type == 'cont':
                     X[:, idx] = X[:, idx]
                 elif var_type == 'bin':
+                    print('nothing here')
                     X[:, idx] = torch.sigmoid(X[:, idx])
             return X
         else:
