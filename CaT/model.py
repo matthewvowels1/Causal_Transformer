@@ -89,24 +89,23 @@ class Head(nn.Module):
         Forward pass for the Head module.
         """
 
-        # K = self.act(self.key(X))  # B, T, hs
-        # Q = self.act(self.query(X))  # B, T, hs
-        V = self.act(self.value(X))  # B, T, hs
-        #
-        # # B, T, HS = Q.shape
-        # S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
-        #
-        # self.Sprime = self.dag_mod.T * (self.dag_mod.T @ S_qk)
-        # self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
-        # self.Sprime = F.softmax(self.Sprime, dim=-1)
-        # nan_rows = torch.any(torch.isnan(self.Sprime), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
-        # nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
-        # self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
-        #                            self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-        #
-        Vprime = self.dag_mod.T @ V
-        # O = self.Sprime @ V + Vprime  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
-        return Vprime
+        K = self.key(X)  # B, T, hs
+        Q = self.query(X)  # B, T, hs
+        V = self.value(X)  # B, T, hs
+
+        # B, T, HS = Q.shape
+        S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
+
+        self.Sprime = self.dag_mod.T * (self.dag_mod.T @ S_qk)
+        self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
+        self.Sprime = F.softmax(self.Sprime, dim=-1)
+        nan_rows = torch.any(torch.isnan(self.Sprime), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
+        nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
+        self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
+                                   self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+
+        O = self.Sprime @ V   # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+        return O
 
 
 
