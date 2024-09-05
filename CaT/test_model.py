@@ -247,7 +247,6 @@ class DynamicLinearEmbedding(nn.Module):
 class CaT(nn.Module):
     def __init__(
             self,
-            input_n_var: int,
             input_dim: int,
             embed_dim: int,
             num_heads: int,
@@ -265,7 +264,6 @@ class CaT(nn.Module):
         Initialize components of the Causal Transformer.
 
         Args:
-            input_n_var (int): Number of variables in the input.
             input_dim (int): Dimensionality of the input embeddings before modifying it.
             embed_dim (int): Dimensionality of the input embeddings after modification.
             num_heads (int): Number of attention heads.
@@ -280,7 +278,7 @@ class CaT(nn.Module):
             activation_function (str): 'Swish', 'ReLU', or 'tanh'
         '''
         super().__init__()
-        self.input_n_var = input_n_var
+        self.input_n_var = len(var_types)
         self.input_dim = input_dim
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -297,19 +295,15 @@ class CaT(nn.Module):
         self.activation_function = activation_function
 
         self.y_0 = nn.Parameter(torch.randn([self.input_n_var, self.embed_dim]), requires_grad=True)
-        # print(f"y_0:{self.y_0.shape}{self.y_0}")
-        self.embedding = DynamicLinearEmbedding(input_dim=input_dim, output_dim=embed_dim, num_vectors=input_n_var)
+        self.embedding = DynamicLinearEmbedding(input_dim=self.input_dim, output_dim=self.embed_dim, num_vectors=self.input_n_var)
 
         self.blocks = nn.ModuleList()  # main bulk of network
         self.lm_head = nn.Linear(self.embed_dim, self.input_dim, bias=True)  # very last dense layer
 
-        # loss stuff
         self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering,
                                    causal_ordering=self.causal_ordering)
 
-        # Store original and setup DAG
         self.original_dag = dag.clone().detach()
-        self.eye = torch.eye(self.original_dag.size(0), device=self.device)
         self.was_shuffled = False
 
         def init_weights(m):
