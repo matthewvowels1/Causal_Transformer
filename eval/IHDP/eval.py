@@ -4,17 +4,13 @@ import numpy as np
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 
 from CaT.datasets import reorder_dag, get_full_ordering
+from CaT.inference import CausalInference
 from CaT.test_model import CaT
 from loader import load_IHDP
 import torch
 
-seed = 1
-np.random.seed(seed=seed)
-torch.manual_seed(seed)
-device = 'cuda'
 
-
-def instantiate_model():
+def instantiate_model(device):
     dropout_rate = 0.0
     ff_n_embed = 4
     num_heads = 3
@@ -25,19 +21,19 @@ def instantiate_model():
 
     DAGnx = nx.DiGraph()
 
-
     # types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
     var_types = {
-        'treatment': 'bin',
+        'x': 'bin',
         'y': 'cont',
         **{str(i): 'bin' for i in range(7, 26)},
         **{str(i): 'cont' for i in range(1, 7)}
     }
 
     DAGnx.add_edges_from(
-        [('treatment', 'y')] + [(str(i), 'treatment') for i in range(1, 26)] + [(str(i), 'y') for i in range(1, 26)])
+        [('x', 'y')] + [(str(i), 'x') for i in range(1, 26)] + [(str(i), 'y') for i in range(1, 26)])
     DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
     causal_ordering = get_full_ordering(DAGnx)
+    print(causal_ordering)
     model = CaT(
         input_dim=input_dim,
         embed_dim=embed_dim,
@@ -55,7 +51,7 @@ def instantiate_model():
     return model
 
 
-def train(model, train, test):
+def train(model, train, test, device):
     shuffling = 0
     max_iters = 5000
     eval_interval = 100
@@ -72,6 +68,9 @@ def train(model, train, test):
     warmup_iters = max_iters // 5  # Number of iterations for warmup
     scheduler_warmup = LambdaLR(optimizer, lr_lambda=lr_lambda)
     scheduler_cyclic = CosineAnnealingLR(optimizer, T_max=max_iters - warmup_iters)
+
+    train = torch.from_numpy(train).to(device).float()
+    test = torch.from_numpy(test).to(device).float()
 
     all_var_losses = {}
     sub_epoch = []
@@ -116,37 +115,39 @@ def train(model, train, test):
     model.eval()
 
 
-for i in range(1, 3):
-    model = instantiate_model()
-    dataset = {}
-    true_ite = {}
-    for split in ('train', 'test'):
-        z, x, y, y1, y0 = load_IHDP(path="data/", replication=i, split=split)
-        data = numpy.concatenate([z, x, y], axis=1)
-        data = data.reshape([-1, 27, 1])
-        data = torch.from_numpy(data).to(device=device).float()
-        dataset[split] = data
-        true_ite[split] = y1 - y0
+if __name__ == "__main__":
+    seed = 1
+    np.random.seed(seed=seed)
+    torch.manual_seed(seed)
+    device = 'cuda'
+    for i in range(1, 3):
+        model = instantiate_model(device=device)
+        dataset = {}
+        true_ite = {}
+        for split in ('train', 'test'):
+            z, x, y, y1, y0 = load_IHDP(path="data/", replication=i, split=split)
+            data = numpy.concatenate([z, x, y], axis=1)
+            data = data.reshape([-1, 27, 1])
+            dataset[split] = data
+            true_ite[split] = y1 - y0
 
-    train(model=model, train=dataset['train'], test=dataset['test'])
+        train(model=model, train=dataset['train'], test=dataset['test'], device=device)
 
-    for split in ('train', 'test'):
+        for split in ('train', 'test'):
+            ci = CausalInference(model=model, device=device)
 
+            D0 = ci.forward(data=dataset[split], intervention_nodes_vals={'x': 0})
+            D1 = ci.forward(data=dataset[split], intervention_nodes_vals={'x': 1})
 
-        data0 = dataset[split].clone()
-        data0[:, -2, :] = 0
-        data1 = dataset[split].clone()
-        data1[:, -2, :] = 1
+            output0 = D0[:, -1, :].reshape([-1])
+            output1 = D1[:, -1, :].reshape([-1])
 
-        output0 = model(data0)[:, -1, :].detach().cpu().numpy().reshape([-1])
-        output1 = model(data1)[:, -1, :].detach().cpu().numpy().reshape([-1])
+            est_ite = output1 - output0
+            est_ate = est_ite.mean()
 
-        est_ite = output1 - output0
-        est_ate = est_ite.mean()
+            pehe = np.sqrt(
+                np.mean((true_ite[split].squeeze() - est_ite) * (true_ite[split].squeeze() - est_ite)))
+            eate = np.abs(true_ite[split].mean() - est_ate)
 
-        pehe = np.sqrt(
-            np.mean((true_ite[split].squeeze() - est_ite) * (true_ite[split].squeeze() - est_ite)))
-        eate = np.abs(true_ite[split].mean() - est_ate)
-
-        with open("output.txt", "a") as file:
-            file.write(f"i: {i}\nsplit: {split}\npehe: {pehe}\neate: {eate}\n")
+            with open("output.txt", "a") as file:
+                file.write(f"i: {i}\nsplit: {split}\npehe: {pehe}\neate: {eate}\n")
