@@ -1,14 +1,20 @@
-import torch
-import numpy as np
 import networkx as nx
-from utils import find_element_in_list
-from typing import Union
+import torch
 
 
 def predict(model, data, device):
-    model.eval()
     data = torch.from_numpy(data).float().to(device)
     return model.forward(data)
+
+
+def find_element_in_list(input_list, target_string):
+    matching_indices = []
+    for index, element in enumerate(input_list):
+        # Check if the element is equal to the target string
+        if element == target_string:
+            # If it matches, add the index to the matching_indices list
+            matching_indices.append(index)
+    return matching_indices
 
 
 def remove_incoming_edges(graph, target_node='X'):
@@ -44,8 +50,8 @@ class CausalInference():
         :param model: causal transformer CaT pytorch model
         '''
         self.model = model
+        self.dag = self.model.nxdag
         self.ordering = self.model.causal_ordering
-        self.dag = self.model.dag
         self.device = device
 
     def forward(self, data, intervention_nodes_vals=None):
@@ -71,9 +77,7 @@ class CausalInference():
                 descs = list(nx.descendants(self.dag, var))
                 all_descs.append(descs)
             all_descs = [item for sublist in all_descs for item in sublist]
-
             vars_to_update = set(all_descs) - set(intervention_nodes_vals.keys())
-
             # get corresponding column indexes
             indices_to_update = []
             for var_name in vars_to_update:
@@ -81,16 +85,15 @@ class CausalInference():
 
             # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
             min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
-
             for i, var in enumerate(list(self.dag.nodes())):
-                if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
+                if self.ordering[
+                    var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
                     # generate predictions , updating the input dataset each time
-                    preds = predict(model=self.model, data=Dprime, device=self.device)[:, i]  # get prediction for each variable
+                    preds = predict(model=self.model, data=Dprime, device=self.device)[:,
+                            i]  # get prediction for each variable
                     if i in indices_to_update:
                         Dprime[:, i] = preds.detach().cpu().numpy()
         else:
             Dprime = predict(model=self.model, data=data, device=self.device)
 
         return Dprime
-
-
