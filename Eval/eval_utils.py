@@ -1,36 +1,18 @@
-import networkx as nx
-import numpy
-import numpy as np
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
-
-from CaT.datasets import reorder_dag, get_full_ordering
-from CaT.inference import CausalInference
-from CaT.test_model import CaT
-from loader import load_IHDP
 import torch
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+from CaT.datasets import reorder_dag, get_full_ordering
+from CaT.test_model import CaT
 
-
-def instantiate_model(device):
-    dropout_rate = 0.0
-    ff_n_embed = 4
-    num_heads = 3
-    n_layers = 1
-    embed_dim = 5
-    head_size = 4
-    input_dim = 1
-
-    DAGnx = nx.DiGraph()
-
-    # types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
-    var_types = {
-        'x': 'bin',
-        'y': 'cont',
-        **{str(i): 'bin' for i in range(7, 26)},
-        **{str(i): 'cont' for i in range(1, 7)}
-    }
-
-    DAGnx.add_edges_from(
-        [('x', 'y')] + [(str(i), 'x') for i in range(1, 26)] + [(str(i), 'y') for i in range(1, 26)])
+def instantiate_CaT(device,
+                    var_types,
+                    DAGnx,
+                    dropout_rate=0.0,
+                    ff_n_embed=4,
+                    num_heads=3,
+                    n_layers=1,
+                    embed_dim=5,
+                    head_size=4,
+                    input_dim=1):
     DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
     causal_ordering = get_full_ordering(DAGnx)
     print(causal_ordering)
@@ -50,14 +32,8 @@ def instantiate_model(device):
     ).to(device)
     return model
 
-
-def train(model, train, test, device):
-    shuffling = 0
-    max_iters = 5000
-    eval_interval = 100
-    eval_iters = 10
-    learning_rate = 2e-4
-
+def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_interval=100, eval_iters=10,
+                learning_rate=2e-4):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
     def lr_lambda(epoch):
@@ -69,8 +45,14 @@ def train(model, train, test, device):
     scheduler_warmup = LambdaLR(optimizer, lr_lambda=lr_lambda)
     scheduler_cyclic = CosineAnnealingLR(optimizer, T_max=max_iters - warmup_iters)
 
-    train = torch.from_numpy(train).to(device).float()
-    test = torch.from_numpy(test).to(device).float()
+    def to_torch_device(data):
+        if not isinstance(data, torch.Tensor):
+            # If not a tensor, convert from numpy to tensor
+            data = torch.from_numpy(data)
+        return data.to(device).float()
+
+    train = to_torch_device(train)
+    test = to_torch_device(test)
 
     all_var_losses = {}
     sub_epoch = []
@@ -113,41 +95,3 @@ def train(model, train, test, device):
             print(
                 f"step {iter_} of {max_iters}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
     model.eval()
-
-
-if __name__ == "__main__":
-    seed = 1
-    np.random.seed(seed=seed)
-    torch.manual_seed(seed)
-    device = 'cuda'
-    for i in range(1, 3):
-        model = instantiate_model(device=device)
-        dataset = {}
-        true_ite = {}
-        for split in ('train', 'test'):
-            z, x, y, y1, y0 = load_IHDP(path="data/", replication=i, split=split)
-            data = numpy.concatenate([z, x, y], axis=1)
-            data = data.reshape([-1, 27, 1])
-            dataset[split] = data
-            true_ite[split] = y1 - y0
-
-        train(model=model, train=dataset['train'], test=dataset['test'], device=device)
-
-        for split in ('train', 'test'):
-            ci = CausalInference(model=model, device=device)
-
-            D0 = ci.forward(data=dataset[split], intervention_nodes_vals={'x': 0})
-            D1 = ci.forward(data=dataset[split], intervention_nodes_vals={'x': 1})
-
-            output0 = D0[:, -1, :].reshape([-1])
-            output1 = D1[:, -1, :].reshape([-1])
-
-            est_ite = output1 - output0
-            est_ate = est_ite.mean()
-
-            pehe = np.sqrt(
-                np.mean((true_ite[split].squeeze() - est_ite) * (true_ite[split].squeeze() - est_ite)))
-            eate = np.abs(true_ite[split].mean() - est_ate)
-
-            with open("output.txt", "a") as file:
-                file.write(f"i: {i}\nsplit: {split}\npehe: {pehe}\neate: {eate}\n")
