@@ -381,7 +381,6 @@ class CaT(nn.Module):
                 if var_type == 'cont':
                     Y[:, idx] = Y[:, idx]
                 elif var_type == 'bin':
-                    print('nothing here')
                     Y[:, idx] = torch.sigmoid(Y[:, idx])
             return Y
         else:
