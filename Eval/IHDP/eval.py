@@ -56,7 +56,7 @@ if __name__ == "__main__":
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
     device = 'cuda'
-    for i in range(1, 3):
+    for i in range(1, 101):
         model = instantiate_model(device=device)
         dataset = {}
         true_ite = {}
@@ -85,5 +85,5 @@ if __name__ == "__main__":
                 np.mean((true_ite[split].squeeze() - est_ite) * (true_ite[split].squeeze() - est_ite)))
             eate = np.abs(true_ite[split].mean() - est_ate)
 
-            with open("output.txt", "a") as file:
+            with open("output.txt", "w") as file:
                 file.write(f"i: {i}\nsplit: {split}\npehe: {pehe}\neate: {eate}\n")
