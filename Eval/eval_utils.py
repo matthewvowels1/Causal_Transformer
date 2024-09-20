@@ -32,7 +32,7 @@ def instantiate_CaT(device,
     ).to(device)
     return model
 
-def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_interval=100, eval_iters=10,
+def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_interval=200, eval_iters=1,
                 learning_rate=2e-4):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
