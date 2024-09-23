@@ -2,12 +2,13 @@ import networkx as nx
 import numpy as np
 import torch
 from test_model import CaT
-import inference
 import pandas as pd
 import matplotlib.pyplot as plt
 from datasets import get_full_ordering, reorder_dag
 import utils
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+
+from utils import inference
 
 shuffling = 0
 seed = 1
@@ -160,7 +161,6 @@ for i in range(1):
     input_n_var = all_data.shape[1]
 
     model = CaT(
-        input_n_var=input_n_var,
         input_dim=input_dim,
         embed_dim= embed_dim,
         dropout_rate=dropout_rate,
