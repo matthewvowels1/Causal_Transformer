@@ -202,7 +202,8 @@ class Block(nn.Module):
     """
 
     def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
-                 dag: torch.Tensor, use_bias: bool = False, device: Optional[torch.device] = None,
+                 dag: torch.Tensor, use_batch_norm: bool, input_n_var: int, use_bias: bool = False,
+                 device: Optional[torch.device] = None,
                  activation_function: str = 'Swish'):
         super().__init__()
         self.activation_function = activation_function
@@ -216,7 +217,10 @@ class Block(nn.Module):
                                       activation_function=self.activation_function)
         self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate,
                      activation_function=self.activation_function)
-
+        if use_batch_norm:
+            self.batch_norm = nn.BatchNorm1d(num_features=input_n_var)
+        else:
+            self.batch_norm = None
         if isinstance(dag, torch.Tensor):
             dag = dag.clone().detach()
         else:
@@ -231,6 +235,8 @@ class Block(nn.Module):
         mha_out = self.mha(X, Y)
         ff_out = self.ff(mha_out)
         mha_out = mha_out + ff_out
+        if self.batch_norm is not None:
+            mha_out = self.batch_norm(mha_out)
         return mha_out
 
 
@@ -258,6 +264,7 @@ class CaT(nn.Module):
             var_types: Dict[str, str],
             causal_ordering: Dict[str, int],
             device=None,
+            use_batch_norm=True,
             activation_function='Swish'
     ):
         '''
@@ -293,6 +300,7 @@ class CaT(nn.Module):
         self.causal_ordering = causal_ordering
         self.var_types = var_types
         self.activation_function = activation_function
+        self.use_batch_norm = use_batch_norm
 
         self.y_0 = nn.Parameter(torch.randn([self.input_n_var, self.embed_dim]), requires_grad=True)
         self.embedding = DynamicLinearEmbedding(input_dim=self.input_dim, output_dim=self.embed_dim,
@@ -325,7 +333,10 @@ class CaT(nn.Module):
         for i in range(self.n_layers):
             self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
                                      input_dim=self.embed_dim, head_size=self.head_size,
-                                     dropout_rate=self.dropout_rate, use_bias=True, dag=self.original_dag,
+                                     dropout_rate=self.dropout_rate,
+                                     use_batch_norm=self.use_batch_norm,
+                                     input_n_var=self.input_n_var,
+                                     use_bias=True, dag=self.original_dag,
                                      device=self.device,
                                      activation_function=self.activation_function))  # use_bias=(i >= 1), dag=current_dag, device=self.device))
 
