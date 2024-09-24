@@ -295,7 +295,8 @@ class CaT(nn.Module):
         self.activation_function = activation_function
 
         self.y_0 = nn.Parameter(torch.randn([self.input_n_var, self.embed_dim]), requires_grad=True)
-        self.embedding = DynamicLinearEmbedding(input_dim=self.input_dim, output_dim=self.embed_dim, num_vectors=self.input_n_var)
+        self.embedding = DynamicLinearEmbedding(input_dim=self.input_dim, output_dim=self.embed_dim,
+                                                num_vectors=self.input_n_var)
 
         self.blocks = nn.ModuleList()  # main bulk of network
         self.lm_head = nn.Linear(self.embed_dim, self.input_dim, bias=True)  # very last dense layer
@@ -336,7 +337,8 @@ class CaT(nn.Module):
             for head in block.mha.heads:
                 head.dag_mod = self.original_dag
 
-    def forward(self, X: torch.Tensor, targets: Optional[torch.Tensor] = None, shuffling: bool = False) -> Union[
+    def forward(self, X: torch.Tensor, mask: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None,
+                shuffling: bool = False) -> Union[
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor, Dict]]:
         """
         Processes input through the model, applying shuffling if specified.
@@ -382,6 +384,8 @@ class CaT(nn.Module):
                     Y[:, idx] = Y[:, idx]
                 elif var_type == 'bin':
                     Y[:, idx] = torch.sigmoid(Y[:, idx])
+            if mask:
+                Y = Y * mask
             return Y
         else:
             loss, loss_tracker = self.loss_func(Y, targets, shuffle_ordering)

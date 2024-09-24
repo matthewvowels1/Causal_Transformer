@@ -3,6 +3,23 @@ import networkx as nx
 from typing import List, Tuple
 
 
+def pad_vectors_with_mask(vectors: List[np.ndarray])-> Tuple[np.ndarray, np.ndarray]:
+    max_len = max(len(vec) for vec in vectors)
+
+    # Initialize arrays for padded vectors and the mask
+    padded_vectors = np.zeros((len(vectors), max_len))
+    mask = np.zeros((len(vectors), max_len), dtype=int)
+
+    # Pad vectors and create mask
+    for i, vec in enumerate(vectors):
+        length = len(vec)
+        padded_vectors[i, :length] = vec  # Copy the original vector values
+        mask[i, :length] = 1  # Mark the positions of original values
+
+    return padded_vectors, mask
+
+
+
 def assert_neuron_layers(layers, input_size):
     # Assert that the smallest number of neurons is never lower than input_size
     assert min(layers) >= input_size, "The smallest layer size must be at least the input size."
