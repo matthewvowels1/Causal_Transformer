@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import networkx as nx
 import numpy as np
-from typing import List, Union, Optional, Dict
-import utils
+from typing import List, Union, Optional, Dict, Any, Tuple
 
 
 class Swish(nn.Module):
@@ -14,7 +13,7 @@ class Swish(nn.Module):
 class MaskedLinear(nn.Module):
     """A linear layer with an optional mask applied to its weights."""
 
-    def __init__(self, in_features: int, out_features: int, use_bias: bool, device=None):
+    def __init__(self, in_features: int, out_features: int, mask, use_bias: bool, device=None):
         """
         Initializes the MaskedLinear layer.
 
@@ -27,8 +26,8 @@ class MaskedLinear(nn.Module):
         self.use_bias = use_bias
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features), requires_grad=True).float()
-        self.mask = None
+        self.weight = nn.Parameter(torch.Tensor(in_features, out_features), requires_grad=True).float()
+        self.set_mask(mask)
 
         # set bias conditional on layer number
         if self.use_bias:
@@ -52,6 +51,16 @@ class MaskedLinear(nn.Module):
                 Must be either a NumPy array or a PyTorch tensor.
         """
         if isinstance(mask, np.ndarray):
+            original_rows, original_columns = mask.shape
+            target_rows, target_columns = self.in_features, self.out_features
+
+            # Calculate the number of times to repeat each row and column
+            row_repeats = target_rows // original_rows
+            column_repeats = target_columns // original_columns
+
+            # Repeat rows and columns to expand the matrix
+            mask = np.repeat(np.repeat(mask, row_repeats, axis=0), column_repeats, axis=1)
+
             # Convert from NumPy array to Tensor and set the correct dtype
             mask_tensor = torch.from_numpy(mask).float().to(self.device)
         elif isinstance(mask, torch.Tensor):
@@ -72,7 +81,7 @@ class MaskedLinear(nn.Module):
             pass
 
     def forward(self, input):
-        masked_weight = self.weight.transpose(0, 1) * self.mask
+        masked_weight = self.weight * self.mask
         masked_linear = torch.matmul(input, masked_weight) + self.bias
         return masked_linear
 
@@ -94,63 +103,50 @@ class DAGAutoencoder(nn.Module):
             dropout_rate (float, optional): Probability of an element to be zeroed. Defaults to 0.5.
         """
         super(DAGAutoencoder, self).__init__()
-        utils.assert_neuron_layers(layers=neurons_per_layer, input_size=len(var_types.keys()))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.dag = dag
         self.orig_var_name_ordering = list(self.dag.nodes())
         self.neurons_per_layer = neurons_per_layer
         self.causal_ordering = causal_ordering
-        self.input_layers = nn.ModuleList()
-        self.layers = nn.ModuleList()
         self.dropout_rate = dropout_rate
         self.var_types = var_types
-        self.activations = nn.ModuleList()
-        self.original_masks = []  # This will be set initially and not changed
-        self.current_masks = []  # Masks currently being used by the layers
-        self.original_adj_matrix = torch.tensor(nx.to_numpy_array(self.dag),
-                                                dtype=torch.float64)  # Store the original adjacency matrix
         self.dropout_layers = nn.ModuleList(
             [nn.Dropout(p=self.dropout_rate) for _ in range(len(neurons_per_layer) - 1)])
         self.was_shuffled = False
         self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering,
                                    causal_ordering=self.causal_ordering)
 
-        for i in range(len(self.neurons_per_layer) - 1):
-            linear_layer = MaskedLinear(neurons_per_layer[i], self.neurons_per_layer[i + 1], use_bias=False,
-                                        device=self.device)
-            input_layer = MaskedLinear(neurons_per_layer[0], self.neurons_per_layer[i + 1], use_bias=True,
-                                       device=self.device)
-            self.layers.append(linear_layer)
-            self.input_layers.append(input_layer)
-            if i < len(self.neurons_per_layer) - 2:
-                self.activations.append(Swish())
+        initial_adj_matrix = nx.to_numpy_array(dag)
+        diag_adj_matrix = initial_adj_matrix + np.eye(initial_adj_matrix.shape[0], dtype=np.float32)
+
+        self.input_layers = nn.ModuleList(
+            [MaskedLinear(self.neurons_per_layer[0], self.neurons_per_layer[i], mask=initial_adj_matrix, use_bias=True,
+                          device=self.device)
+             for i in range(1, len(self.neurons_per_layer))])
+
+        self.feature_layers = nn.ModuleList(
+            [MaskedLinear(self.neurons_per_layer[i - 1], self.neurons_per_layer[i], mask=diag_adj_matrix,
+                          use_bias=False, device=self.device)
+             for i in range(2, len(self.neurons_per_layer))])
+
+        self.activations = nn.ModuleList(
+            [Swish() for _ in range(1, len(self.neurons_per_layer) - 1)])
 
         self.to(self.device)
 
-    def initialize_masks(self, masks: List[torch.Tensor]):
+    def set_masks(self, mask: np.ndarray):
         """
-        Initializes the original masks for the autoencoder. This is intended to be called only once.
+        Applies mask to each layer in the autoencoder.
 
         Args:
-            masks (List[torch.Tensor]): List of tensors representing the masks for each layer.
+            mask (np.ndarray): Mask to apply to the linear layers.
         """
-        # Initialize original masks, only called once
-        self.original_masks = [mask.clone() for mask in masks]
-        self.set_masks(masks)
 
-    def set_masks(self, masks: List[torch.Tensor]):
-        """
-        Applies masks to each layer in the autoencoder.
-
-        Args:
-            masks (List[torch.Tensor]): Masks to apply to the linear layers.
-        """
-        self.current_masks = []
-        # Apply masks only to linear layers
-        assert len(masks) == len(self.layers), "The number of masks must match the number of linear layers."
-        for layer, mask in zip(self.layers, masks):
+        for layer in self.input_layers:
             layer.set_mask(mask)
-            self.current_masks.append(mask)
+
+        for layer in self.feature_layers:
+            layer.set_mask(mask + np.eye(mask.shape[0], dtype=np.float32))
 
     def forward(self, X: torch.Tensor, targets: Optional[torch.Tensor] = None,
                 shuffling: bool = False, verbose: bool = False) -> torch.Tensor:
@@ -168,28 +164,25 @@ class DAGAutoencoder(nn.Module):
         if shuffling:
             shuffle_ordering = torch.randperm(X.size(1))
             X = X[:, shuffle_ordering]
-            shuffled_matrix = self.original_adj_matrix[shuffle_ordering][:, shuffle_ordering].numpy()
-            shuffled_masks = [torch.from_numpy(mask).float().to(torch.float64) for mask in
-                              utils.expand_adjacency_matrix(self.neurons_per_layer[1:], shuffled_matrix)]
-            self.set_masks(shuffled_masks)
+            shuffled_mask = nx.to_numpy_array(self.dag)[shuffle_ordering][:, shuffle_ordering]
+            self.set_masks(shuffled_mask)
             self.was_shuffled = True
 
         elif shuffling == False and self.was_shuffled:
-            self.set_masks(self.original_masks)
+            self.set_masks(nx.to_numpy_array(self.dag))
             self.was_shuffled = False
 
-        for i, (input_linear, linear, activation) in enumerate(zip(self.input_layers, self.layers, self.activations)):
-            # Put stuff here X -> X + softmax(linear layer) -> X
-            if i == 0:
-                Y = activation(input_linear(X))
+        for i, (input_linear, feature_linear, activation) in enumerate(
+                zip(self.input_layers, [None] + list(self.feature_layers), list(self.activations) + [None])):
+            if feature_linear is None:
+                Y = input_linear(X)
             else:
-                Y = activation(Y + input_linear(X) + linear(Y))
+                Y = input_linear(X) + feature_linear(Y)
+            if activation is not None:
+                Y = activation(Y)
             if verbose:
                 print('layer:', i)
                 print(Y)
-        # X = self.dropout_layers[i](X)
-
-        X = Y + self.input_layers[-1](Y) + self.layers[-1](Y)
 
         if targets is None:
             for i, var_name in enumerate(self.orig_var_name_ordering):
@@ -197,14 +190,14 @@ class DAGAutoencoder(nn.Module):
                 var_type = self.var_types[var_name]
                 idx = shuffle_ordering[i]
                 if var_type == 'cont':
-                    X[:, idx] = X[:, idx]
+                    Y[:, idx] = Y[:, idx]
                 elif var_type == 'bin':
-                    X[:, idx] = torch.sigmoid(X[:, idx])
+                    Y[:, idx] = torch.sigmoid(Y[:, idx])
 
-            return X
+            return Y
         else:
-            loss, loss_tracker = self.loss_func(pred=X, target=targets, shuffle_ordering=shuffle_ordering)
-            return X, loss, loss_tracker
+            loss, loss_tracker = self.loss_func(pred=Y, target=targets, shuffle_ordering=shuffle_ordering)
+            return Y, loss, loss_tracker
 
 
 class MixedLoss(nn.Module):
