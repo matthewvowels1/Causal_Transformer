@@ -3,21 +3,29 @@ import networkx as nx
 from typing import List, Tuple
 
 
-def pad_vectors_with_mask(vectors: List[np.ndarray])-> Tuple[np.ndarray, np.ndarray]:
-    max_len = max(len(vec) for vec in vectors)
+def pad_vectors_with_mask(vectors: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+    # Check that all arrays have the same number of rows (N)
+    N = vectors[0].shape[0]
+    if not all(vec.shape[0] == N for vec in vectors):
+        raise ValueError("All arrays must have the same number of rows (N).")
+
+    # Find the maximum number of columns across all arrays
+    max_c = max(vec.shape[1] for vec in vectors)
 
     # Initialize arrays for padded vectors and the mask
-    padded_vectors = np.zeros((len(vectors), max_len))
-    mask = np.zeros((len(vectors), max_len), dtype=int)
+    padded_vectors = np.zeros((len(vectors), N, max_c))
+    mask = np.zeros((len(vectors), N, max_c), dtype=int)
 
-    # Pad vectors and create mask
+    # Pad vectors and create the mask
     for i, vec in enumerate(vectors):
-        length = len(vec)
-        padded_vectors[i, :length] = vec  # Copy the original vector values
-        mask[i, :length] = 1  # Mark the positions of original values
+        c = vec.shape[1]
+        padded_vectors[i, :, :c] = vec  # Copy the original vector values
+        mask[i, :, :c] = 1  # Mark the positions of original values
+
+    padded_vectors = np.transpose(padded_vectors, (1, 0, 2))  # (T, N, C) -> (N, T, C)
+    mask = np.transpose(mask, (1, 0, 2))  # (T, N, C) -> (N, T, C)
 
     return padded_vectors, mask
-
 
 
 def assert_neuron_layers(layers, input_size):
