@@ -104,8 +104,8 @@ class DAGAutoencoder(nn.Module):
         """
         super(DAGAutoencoder, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
-        self.dag = dag
-        self.orig_var_name_ordering = list(self.dag.nodes())
+        self.nxdag = dag
+        self.orig_var_name_ordering = list(self.nxdag.nodes())
         self.neurons_per_layer = neurons_per_layer
         self.causal_ordering = causal_ordering
         self.dropout_rate = dropout_rate
@@ -131,6 +131,9 @@ class DAGAutoencoder(nn.Module):
 
         self.activations = nn.ModuleList(
             [Swish() for _ in range(1, len(self.neurons_per_layer) - 1)])
+
+        self.dropout_layers = nn.ModuleList(
+            [nn.Dropout(p=self.dropout_rate) for _ in range(1, len(self.neurons_per_layer) - 1)])
 
         self.to(self.device)
 
@@ -160,29 +163,38 @@ class DAGAutoencoder(nn.Module):
         Returns:
             torch.Tensor: The output of the autoencoder.
         """
+        orginal_shape = X.shape
+        X = X.view(X.size(0), -1)
         shuffle_ordering = np.arange(X.shape[1])
         if shuffling:
             shuffle_ordering = torch.randperm(X.size(1))
             X = X[:, shuffle_ordering]
-            shuffled_mask = nx.to_numpy_array(self.dag)[shuffle_ordering][:, shuffle_ordering]
+            shuffled_mask = nx.to_numpy_array(self.nxdag)[shuffle_ordering][:, shuffle_ordering]
             self.set_masks(shuffled_mask)
             self.was_shuffled = True
 
         elif shuffling == False and self.was_shuffled:
-            self.set_masks(nx.to_numpy_array(self.dag))
+            self.set_masks(nx.to_numpy_array(self.nxdag))
             self.was_shuffled = False
 
-        for i, (input_linear, feature_linear, activation) in enumerate(
-                zip(self.input_layers, [None] + list(self.feature_layers), list(self.activations) + [None])):
+        for i, (input_linear, feature_linear, activation, dropout) in enumerate(
+                zip(self.input_layers,
+                    [None] + list(self.feature_layers),
+                    list(self.activations) + [None],
+                    list(self.dropout_layers) + [None])):
             if feature_linear is None:
                 Y = input_linear(X)
             else:
                 Y = input_linear(X) + feature_linear(Y)
             if activation is not None:
                 Y = activation(Y)
+            if dropout is not None:
+                Y = dropout(Y)
             if verbose:
                 print('layer:', i)
                 print(Y)
+
+        Y = Y.view(orginal_shape)
 
         if targets is None:
             for i, var_name in enumerate(self.orig_var_name_ordering):
