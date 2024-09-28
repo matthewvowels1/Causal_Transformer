@@ -1,6 +1,6 @@
 import networkx as nx
 import torch
-
+import warnings
 
 def predict(model, data, device):
     data = torch.from_numpy(data).float().to(device)
@@ -8,13 +8,7 @@ def predict(model, data, device):
 
 
 def find_element_in_list(input_list, target_string):
-    matching_indices = []
-    for index, element in enumerate(input_list):
-        # Check if the element is equal to the target string
-        if element == target_string:
-            # If it matches, add the index to the matching_indices list
-            matching_indices.append(index)
-    return matching_indices
+    return [index for index, element in enumerate(input_list) if element == target_string]
 
 
 def remove_incoming_edges(graph, target_node='X'):
@@ -44,7 +38,7 @@ def remove_incoming_edges(graph, target_node='X'):
 
 
 class CausalInference():
-    def __init__(self, model, device):
+    def __init__(self, model, device, mask=None):
         '''
         Using the CaT, this model iterates through the causally-constrained attention according to an intervention and some data
         :param model: causal transformer CaT pytorch model
@@ -53,6 +47,15 @@ class CausalInference():
         self.dag = self.model.nxdag
         self.ordering = self.model.causal_ordering
         self.device = device
+        self.mask = mask
+
+        if self.mask is None:
+            warnings.warn(
+                "No mask has been specified. If padding has been used, "
+                "the absence of a mask may lead to incorrect results.",
+                UserWarning
+            )
+
 
     def forward(self, data, intervention_nodes_vals=None):
         '''
@@ -70,6 +73,10 @@ class CausalInference():
                 val = intervention_nodes_vals[var_name]
                 index = find_element_in_list(list(self.dag.nodes()), var_name)
                 Dprime[:, index] = val
+
+            if self.mask is not None:
+                Dprime = Dprime * self.mask
+
 
             # find all descendants of intervention variables which are not in intervention set
             all_descs = []
@@ -91,7 +98,11 @@ class CausalInference():
                     preds = predict(model=self.model, data=Dprime, device=self.device)[:,i]  # get prediction for each variable
                     if i in indices_to_update:
                         Dprime[:, i] = preds.detach().cpu().numpy()
+                        if self.mask is not None:  # apply the mask to the predictions
+                            Dprime = Dprime * self.mask
         else:
-            Dprime = predict(model=self.model, data=data, device=self.device)
+            Dprime = predict(model=self.model, data=data, device=self.device).detach().cpu().numpy()
+            if self.mask is not None:  # apply the mask to the predictions
+                Dprime = Dprime * self.mask
 
         return Dprime

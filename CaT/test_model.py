@@ -110,7 +110,7 @@ class Head(nn.Module):
         nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
         self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
                                   self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-
+        self.Sprime = self.Sprime.float()
         O = self.Sprime @ V  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
         # print(f"O.shape {O.shape}")
         return O
@@ -224,7 +224,7 @@ class Block(nn.Module):
         if isinstance(dag, torch.Tensor):
             dag = dag.clone().detach()
         else:
-            dag = torch.tensor(dag, dtype=torch.float)  # Only convert to tensor if not already one
+            dag = torch.tensor(dag, dtype=torch.float32)  # Only convert to tensor if not already one
         self.register_buffer('dag_mask', dag.unsqueeze(0))  # Adding batch dimension
         self.to(self.device)
 
@@ -293,7 +293,7 @@ class CaT(nn.Module):
         self.head_size = head_size
         self.nxdag = dag
         self.orig_var_name_ordering = list(self.nxdag.nodes())
-        dag = torch.tensor(nx.to_numpy_array(self.nxdag)).to(device)
+        dag = torch.tensor(nx.to_numpy_array(self.nxdag), dtype=torch.float32).to(device)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.n_layers = n_layers
         self.dropout_rate = dropout_rate
@@ -367,7 +367,7 @@ class CaT(nn.Module):
         if shuffling:
             # Shuffle X, targets, and the DAG using the shuffler function
             X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, self.original_dag.clone().cpu().numpy())
-            shuffled_dag = torch.tensor(shuffled_dag, dtype=torch.float, device=self.device)
+            shuffled_dag = torch.tensor(shuffled_dag, dtype=torch.float32, device=self.device)
 
             # Apply the shuffled DAG to each block
             for i, block in enumerate(self.blocks):

@@ -4,28 +4,27 @@ from typing import List, Tuple
 
 
 def pad_vectors_with_mask(vectors: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
-    # Check that all arrays have the same number of rows (N)
+    # T is the length of the list (i.e., number of vars)
+    T = len(vectors)
+
+    # N is the number of rows (samples) in each vector (assumed consistent across all)
     N = vectors[0].shape[0]
-    if not all(vec.shape[0] == N for vec in vectors):
-        raise ValueError("All arrays must have the same number of rows (N).")
 
-    # Find the maximum number of columns across all arrays
-    max_c = max(vec.shape[1] for vec in vectors)
+    # Find the maximum number of columns (C) across all arrays
+    max_c = max(vec.shape[1] for vec in vectors)  # Maximum C (number of features)
 
-    # Initialize arrays for padded vectors and the mask
-    padded_vectors = np.zeros((len(vectors), N, max_c))
-    mask = np.zeros((len(vectors), N, max_c), dtype=int)
+    # Initialize the padded array for vectors (N, T, C) and the mask (T, C)
+    padded_vectors = np.zeros((N, T, max_c), dtype=np.float32)  # (N, T, C)
+    mask = np.zeros((T, max_c),  dtype=np.float32)  # (T, C)
 
     # Pad vectors and create the mask
-    for i, vec in enumerate(vectors):
-        c = vec.shape[1]
-        padded_vectors[i, :, :c] = vec  # Copy the original vector values
-        mask[i, :, :c] = 1  # Mark the positions of original values
-
-    padded_vectors = np.transpose(padded_vectors, (1, 0, 2))  # (T, N, C) -> (N, T, C)
-    mask = np.transpose(mask, (1, 0, 2))  # (T, N, C) -> (N, T, C)
+    for t, vec in enumerate(vectors):
+        c = vec.shape[1]  # Number of columns for this particular time step
+        padded_vectors[:, t, :c] = vec  # Copy the original vector values into padded array
+        mask[t, :c] = 1.0  # Mark the valid positions in the mask
 
     return padded_vectors, mask
+
 
 
 def assert_neuron_layers(layers, input_size):
