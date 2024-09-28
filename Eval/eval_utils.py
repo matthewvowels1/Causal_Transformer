@@ -1,7 +1,56 @@
+import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 from CaT.datasets import reorder_dag, get_full_ordering
 from CaT.test_model import CaT
+
+from CFCN.test_model import DAGAutoencoder
+from CFCN.model import DAGAutoencoder as OldDAGAutoencoder
+
+
+def instantiate_new_CFCN(device,
+                         var_types,
+                         DAGnx,
+                         neurons_per_layer=None,
+                         dropout_rate=0.5, ):
+    DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
+    causal_ordering = get_full_ordering(DAGnx)
+    print(causal_ordering)
+    if neurons_per_layer is None:
+        x = len(var_types)
+        neurons_per_layer = [x, 2 * x, x]
+    model = DAGAutoencoder(
+        neurons_per_layer=neurons_per_layer,
+        dropout_rate=dropout_rate,
+        dag=DAGnx,
+        causal_ordering=causal_ordering,
+        device=device,
+        var_types=var_types,
+    ).to(device)
+    return model
+
+
+def instantiate_old_CFCN(device,
+                         var_types,
+                         DAGnx,
+                         neurons_per_layer=None,
+                         dropout_rate=0.5, ):
+    DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
+    causal_ordering = get_full_ordering(DAGnx)
+    print(causal_ordering)
+    if neurons_per_layer is None:
+        x = len(var_types)
+        neurons_per_layer = [x, 2 * x, x]
+    model = OldDAGAutoencoder(
+        neurons_per_layer=neurons_per_layer,
+        dropout_rate=dropout_rate,
+        dag=DAGnx,
+        causal_ordering=causal_ordering,
+        device=device,
+        var_types=var_types,
+    ).to(device)
+    return model
+
 
 def instantiate_CaT(device,
                     var_types,
@@ -32,7 +81,8 @@ def instantiate_CaT(device,
     ).to(device)
     return model
 
-def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_interval=200, eval_iters=1,
+
+def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_interval=500, eval_iters=1,
                 learning_rate=2e-4):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
@@ -95,3 +145,31 @@ def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_in
             print(
                 f"step {iter_} of {max_iters}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
     model.eval()
+
+
+def compute_result(input_path='output.txt', output_path='result.txt'):
+    with open(input_path, 'r') as file:
+        lines = file.readlines()
+
+    datas = {}
+
+    def parse(split, sort, value):
+        if sort == "pehe":
+            sort = "square root pehe"
+            value = np.sqrt(value)
+        index = f"{split}: {sort}"
+        if index not in datas:
+            datas[index] = []
+        datas[index].append(value)
+
+    for i in range(0, len(lines), 4):
+        split_type = lines[i + 1].split(": ")[1].strip()
+        for j in range(2, 4):
+            splits = lines[i + j].split(": ")
+            parse(split=split_type,
+                  sort=splits[0].strip(),
+                  value=float(splits[1]))
+
+    with open(output_path, "w") as file:
+        for index, values in datas.items():
+            file.write(f"{index}: {np.mean(values):.3f} +- {np.std(values):.3f}  n={len(values)}\n")
