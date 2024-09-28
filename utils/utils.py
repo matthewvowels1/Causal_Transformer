@@ -4,6 +4,9 @@ from typing import List, Tuple
 
 
 def pad_vectors_with_mask(vectors: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+    """Pads list of input arrays according to the length of the highest-d vector.
+    Returns array of padded vectors and corresponding mask.
+    """
     # T is the length of the list (i.e., number of vars)
     T = len(vectors)
 
