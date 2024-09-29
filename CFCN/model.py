@@ -87,7 +87,7 @@ class MaskedLinear(nn.Module):
         return masked_linear
 
 
-class DAGAutoencoder(nn.Module):
+class CFCN(nn.Module):
     """A directed acyclic graph (DAG) autoencoder with optional input shuffling."""
 
     def __init__(self, neurons_per_layer: List[int], dag: nx.DiGraph,
@@ -103,7 +103,7 @@ class DAGAutoencoder(nn.Module):
             var_types (Dict[str, str]): Dictionary mapping variable names to their types (e.g., continuous, categorical).
             dropout_rate (float, optional): Probability of an element to be zeroed. Defaults to 0.5.
         """
-        super(DAGAutoencoder, self).__init__()
+        super(CFCN, self).__init__()
         assert_neuron_layers(layers=neurons_per_layer, input_size=len(var_types.keys()))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.nxdag = dag
