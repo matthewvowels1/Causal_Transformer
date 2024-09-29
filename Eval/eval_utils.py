@@ -4,8 +4,8 @@ from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 from CaT.datasets import reorder_dag, get_full_ordering
 from CaT.test_model import CaT
 
-from CFCN.test_model import DAGAutoencoder
-from CFCN.model import DAGAutoencoder as OldDAGAutoencoder
+from CFCN.test_model import CFCN
+from CFCN.model import CFCN as OldCFCN
 
 
 def instantiate_new_CFCN(device,
@@ -19,7 +19,7 @@ def instantiate_new_CFCN(device,
     if neurons_per_layer is None:
         x = len(var_types)
         neurons_per_layer = [x, 2 * x, x]
-    model = DAGAutoencoder(
+    model = CFCN(
         neurons_per_layer=neurons_per_layer,
         dropout_rate=dropout_rate,
         dag=DAGnx,
@@ -41,7 +41,7 @@ def instantiate_old_CFCN(device,
     if neurons_per_layer is None:
         x = len(var_types)
         neurons_per_layer = [x, 2 * x, x]
-    model = OldDAGAutoencoder(
+    model = OldCFCN(
         neurons_per_layer=neurons_per_layer,
         dropout_rate=dropout_rate,
         dag=DAGnx,
@@ -82,8 +82,16 @@ def instantiate_CaT(device,
     return model
 
 
-def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_interval=500, eval_iters=1,
-                learning_rate=2e-4):
+
+def get_batch(train_data, val_data, split, device, batch_size):
+    data = train_data if split == 'train' else val_data
+    ix = torch.randint(0, len(data), (batch_size,))
+    x = data[ix]
+    return x.to(device)
+
+
+def train_model(model, train_data, val_data, device, shuffling=0, max_iters=5000, eval_interval=500, eval_iters=1,
+                learning_rate=2e-4, batch_size=32):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
     def lr_lambda(epoch):
@@ -101,8 +109,8 @@ def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_in
             data = torch.from_numpy(data)
         return data.to(device).float()
 
-    train = to_torch_device(train)
-    test = to_torch_device(test)
+    train_data = to_torch_device(train_data)
+    val_data = to_torch_device(val_data)
 
     all_var_losses = {}
     sub_epoch = []
@@ -110,8 +118,11 @@ def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_in
     for iter_ in range(0, max_iters):
         # train and update the model
         model.train()
-        xb = torch.clone(train)
-        xb_mod = torch.clone(xb.detach())
+
+        # Get a batch of data
+        xb = get_batch(train_data, val_data, 'train', device, batch_size)
+        xb_mod = torch.clone(xb.detach())  # Create target data
+
         X, loss, loss_dict = model(X=xb, targets=xb_mod, shuffling=shuffling)
 
         optimizer.zero_grad(set_to_none=True)
@@ -134,8 +145,10 @@ def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_in
             for split in ['train', 'val']:
                 losses = torch.zeros(eval_iters)
                 for k in range(eval_iters):
-                    xb = torch.clone(train if split == 'train' else test)
-                    xb_mod = torch.clone(xb.detach())
+                    # Get a batch of data for evaluation
+                    xb = get_batch(train_data, val_data, split, device, batch_size)
+                    xb_mod = torch.clone(xb.detach())  # Create target data
+
                     X, loss, loss_dict = model(X=xb, targets=xb_mod, shuffling=False)
                     losses[k] = loss.item()
                 eval_loss[split] = losses.mean()
@@ -143,9 +156,8 @@ def train_model(model, train, test, device, shuffling=0, max_iters=5000, eval_in
             sub_epoch.append(iter_)
             model.train()
             print(
-                f"step {iter_} of {max_iters}: train_loss {eval_loss['train']:.4f}, val loss {eval_loss['val']:.4f}")
+                f"step {iter_} of {max_iters}: train_loss {eval_loss['train']:.4f}, val_loss {eval_loss['val']:.4f}")
     model.eval()
-
 
 def compute_result(input_path='output.txt', output_path='result.txt'):
     with open(input_path, 'r') as file:
