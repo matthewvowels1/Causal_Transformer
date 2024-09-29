@@ -7,10 +7,6 @@ def predict(model, data, device):
     return model.forward(data)
 
 
-def find_element_in_list(input_list, target_string):
-    return [index for index, element in enumerate(input_list) if element == target_string]
-
-
 def remove_incoming_edges(graph, target_node='X'):
     """
     Creates a copy of the graph, removes all incoming edges to a specified node, and returns the modified graph.
@@ -71,7 +67,7 @@ class CausalInference():
             # modify the dataset with the desired intervention values
             for var_name in intervention_nodes_vals.keys():
                 val = intervention_nodes_vals[var_name]
-                index = find_element_in_list(list(self.dag.nodes()), var_name)
+                index = list(self.dag.nodes()).index(var_name)
                 Dprime[:, index] = val
 
             if self.mask is not None:
@@ -88,7 +84,8 @@ class CausalInference():
             # get corresponding column indexes
             indices_to_update = []
             for var_name in vars_to_update:
-                indices_to_update.append(find_element_in_list(list(self.dag.nodes()), var_name)[0])
+                index = list(self.dag.nodes()).index(var_name)
+                indices_to_update.append(list(self.dag.nodes()).index(var_name))
 
             # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
             min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
