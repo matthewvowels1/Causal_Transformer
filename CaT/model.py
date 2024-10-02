@@ -1,4 +1,5 @@
 import torch
+# from scipy.special import gradient
 from torch.nn import functional as F
 import torch.nn as nn
 import networkx as nx
@@ -29,9 +30,11 @@ class MishAct(nn.Mish):
     def __init__(self):
         super(MishAct, self).__init__()
 
+
 class LeakyReLUAct(nn.LeakyReLU):
     def __init__(self):
         super(LeakyReLUAct, self).__init__()
+
 
 class TanhAct(nn.Module):
     def forward(self, x):
@@ -41,6 +44,7 @@ class TanhAct(nn.Module):
 class ReLUAct(nn.Module):
     def forward(self, x):
         return x * torch.relu(x)
+
 
 class IdentAct(nn.Module):
     def forward(self, x):
@@ -54,7 +58,7 @@ class Head(nn.Module):
     """
 
     def __init__(self, head_size: int, input_dim: int, dropout_rate: float, dag: torch.Tensor, use_bias: bool,
-                 activation_function: str ='Swish', device=None):
+                 activation_function: str = 'Swish', device=None):
         super().__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.key = nn.Linear(input_dim, head_size, bias=use_bias)
@@ -83,30 +87,33 @@ class Head(nn.Module):
 
         self.to(self.device)
 
-
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for the Head module.
         """
-
+        # print(X.shape)
+        # print(f"Y.shape {Y.shape}")
         K = self.key(X)  # B, T, hs
-        Q = self.query(X)  # B, T, hs
+        Q = self.query(Y)  # B, T, hs
         V = self.value(X)  # B, T, hs
-
+        # print(f"Q.shape {Q.shape}")
+        # print(f"K.shape {K.shape}")
         # B, T, HS = Q.shape
         S_qk = torch.matmul(Q, K.transpose(1, 2)) / (self.head_size ** 0.5)
-
-        self.Sprime = self.dag_mod.T * (self.dag_mod.T @ S_qk)
+        # print(f"S_qk.shape {S_qk.shape}")
+        # Could add a matrix with -inf values instead
+        self.Sprime = self.dag_mod.T * S_qk
         self.Sprime = self.Sprime.masked_fill(self.Sprime == 0, float('-inf'))
         self.Sprime = F.softmax(self.Sprime, dim=-1)
-        nan_rows = torch.any(torch.isnan(self.Sprime), dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
+        nan_rows = torch.any(torch.isnan(self.Sprime),
+                             dim=-1)  # check if any rows are <all> -inf, these need to be masked to 0
         nan_mask = nan_rows.unsqueeze(-1).expand_as(self.Sprime).to(self.device)
         self.Sprime = torch.where(nan_mask, torch.zeros_like(self.Sprime),
-                                   self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
-
-        O = self.Sprime @ V   # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+                                  self.Sprime)  # set any rows have nan values (because they have no causal parents) to 0 to avoid nans
+        self.Sprime = self.Sprime.float()
+        O = self.Sprime @ V  # B, T, hs  Transpose DAG to deal extract correct embeddings from V
+        # print(f"O.shape {O.shape}")
         return O
-
 
 
 class MultiHeadAttention(nn.Module):
@@ -124,7 +131,7 @@ class MultiHeadAttention(nn.Module):
         self.heads = nn.ModuleList(
             [Head(head_size=head_size, input_dim=input_dim, dropout_rate=dropout_rate,
                   dag=dag, use_bias=use_bias, device=self.device, activation_function=self.activation_function)
-                for i in range(num_heads)]
+             for i in range(num_heads)]
         )
 
         self.projection = nn.Linear(int(head_size * num_heads), input_dim, bias=True)
@@ -141,14 +148,14 @@ class MultiHeadAttention(nn.Module):
         self.act = activation_map.get(self.activation_function, None)
         self.to(self.device)
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for the MultiHeadAttention module.
         """
-        out = torch.cat([h(X) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
+        out = torch.cat([h(X, Y) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
         out = self.projection(out)
-        out = self.dropout(out)  # B, T, input_dim
         out = self.act(out)
+        out = self.dropout(out)  # B, T, input_dim
         return out
 
 
@@ -195,7 +202,8 @@ class Block(nn.Module):
     """
 
     def __init__(self, ff_n_embed: int, num_heads: int, input_dim: int, head_size: int, dropout_rate: float,
-                 dag: torch.Tensor, use_bias: bool = False, device: Optional[torch.device] = None,
+                 dag: torch.Tensor, use_batch_norm: bool, input_n_var: int, use_bias: bool = False,
+                 device: Optional[torch.device] = None,
                  activation_function: str = 'Swish'):
         super().__init__()
         self.activation_function = activation_function
@@ -209,28 +217,44 @@ class Block(nn.Module):
                                       activation_function=self.activation_function)
         self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate,
                      activation_function=self.activation_function)
-
+        if use_batch_norm:
+            self.batch_norm = nn.BatchNorm1d(num_features=input_n_var)
+        else:
+            self.batch_norm = None
         if isinstance(dag, torch.Tensor):
             dag = dag.clone().detach()
         else:
-            dag = torch.tensor(dag, dtype=torch.float)  # Only convert to tensor if not already one
+            dag = torch.tensor(dag, dtype=torch.float32)  # Only convert to tensor if not already one
         self.register_buffer('dag_mask', dag.unsqueeze(0))  # Adding batch dimension
         self.to(self.device)
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for the Block module.
         """
-        mha_out = self.mha(X)
+        mha_out = self.mha(X, Y)
         ff_out = self.ff(mha_out)
         mha_out = mha_out + ff_out
+        if self.batch_norm is not None:
+            mha_out = self.batch_norm(mha_out)
         return mha_out
+
+
+class DynamicLinearEmbedding(nn.Module):
+    def __init__(self, input_dim, output_dim, num_vectors):
+        super(DynamicLinearEmbedding, self).__init__()
+        self.linear_layers = nn.ModuleList([nn.Linear(input_dim, output_dim) for _ in range(num_vectors)])
+
+    def forward(self, X):
+        # print(f"Dynamic lin Emb X:{X}")
+        return torch.stack([self.linear_layers[i](X[:, i, :]) for i in range(X.shape[-2])], dim=-2)
 
 
 class CaT(nn.Module):
     def __init__(
             self,
             input_dim: int,
+            embed_dim: int,
             num_heads: int,
             ff_n_embed: int,
             head_size: int,
@@ -240,13 +264,15 @@ class CaT(nn.Module):
             var_types: Dict[str, str],
             causal_ordering: Dict[str, int],
             device=None,
+            use_batch_norm=True,
             activation_function='Swish'
     ):
         '''
         Initialize components of the Causal Transformer.
 
         Args:
-            input_dim (int): Dimensionality of the input embeddings.
+            input_dim (int): Dimensionality of the input embeddings before modifying it.
+            embed_dim (int): Dimensionality of the input embeddings after modification.
             num_heads (int): Number of attention heads.
             ff_n_embed (int): Dimensionality of the feedforward network inside the multi-head attention.
             head_size (int): Dimension of each attention head.
@@ -259,30 +285,34 @@ class CaT(nn.Module):
             activation_function (str): 'Swish', 'ReLU', or 'tanh'
         '''
         super().__init__()
+        self.input_n_var = len(var_types)
         self.input_dim = input_dim
+        self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.ff_n_embed = ff_n_embed
         self.head_size = head_size
         self.nxdag = dag
         self.orig_var_name_ordering = list(self.nxdag.nodes())
-        dag = torch.tensor(nx.to_numpy_array(self.nxdag)).to(device)
+        dag = torch.tensor(nx.to_numpy_array(self.nxdag), dtype=torch.float32).to(device)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
         self.n_layers = n_layers
         self.dropout_rate = dropout_rate
         self.causal_ordering = causal_ordering
         self.var_types = var_types
         self.activation_function = activation_function
+        self.use_batch_norm = use_batch_norm
 
-        self.blocks = nn.ModuleList()   # main bulk of network
-        self.lm_head = nn.Linear(self.input_dim, self.input_dim, bias=True)  # very last dense layer
+        self.y_0 = nn.Parameter(torch.randn([self.input_n_var, self.embed_dim]), requires_grad=True)
+        self.embedding = DynamicLinearEmbedding(input_dim=self.input_dim, output_dim=self.embed_dim,
+                                                num_vectors=self.input_n_var)
 
-        # loss stuff
+        self.blocks = nn.ModuleList()  # main bulk of network
+        self.lm_head = nn.Linear(self.embed_dim, self.input_dim, bias=True)  # very last dense layer
+
         self.loss_func = MixedLoss(self.var_types, orig_var_name_ordering=self.orig_var_name_ordering,
                                    causal_ordering=self.causal_ordering)
 
-        # Store original and setup DAG
         self.original_dag = dag.clone().detach()
-        self.eye = torch.eye(self.original_dag.size(0), device=self.device)
         self.was_shuffled = False
 
         def init_weights(m):
@@ -296,45 +326,30 @@ class CaT(nn.Module):
         self.apply(init_weights)
         self.to(self.device)
 
-
-    def modify_dag(self, layer_index: int, dag: torch.Tensor) -> torch.Tensor:
-        """
-        Adjusts the DAG for a given layer by optionally adding an identity matrix.
-
-        Args:
-            layer_index (int): Index of the current layer, determining if identity should be added.
-            dag (torch.Tensor): The current DAG tensor.
-
-        Returns:
-            torch.Tensor: The modified DAG tensor.
-        """
-
-        modified_dag = dag.clone()
-        if layer_index > 0:  # Add identity diagonal to ensure self-connections in subsequent layers
-            modified_dag += self.eye
-        return torch.clamp(modified_dag, 0, 1)
-
     def initialize_blocks(self) -> None:
         """
         Initializes each layer/block with the appropriate DAG setup for the model.
         """
         for i in range(self.n_layers):
-            current_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
             self.blocks.append(Block(ff_n_embed=self.ff_n_embed, num_heads=self.num_heads,
-                                     input_dim=self.input_dim, head_size=self.head_size,
-                                     dropout_rate=self.dropout_rate,  use_bias=True, dag=current_dag,
-                                     device=self.device, activation_function=self.activation_function))  #use_bias=(i >= 1), dag=current_dag, device=self.device))
+                                     input_dim=self.embed_dim, head_size=self.head_size,
+                                     dropout_rate=self.dropout_rate,
+                                     use_batch_norm=self.use_batch_norm,
+                                     input_n_var=self.input_n_var,
+                                     use_bias=True, dag=self.original_dag,
+                                     device=self.device,
+                                     activation_function=self.activation_function))  # use_bias=(i >= 1), dag=current_dag, device=self.device))
 
     def reset_dags(self) -> None:
         """
         Resets the DAGs in all heads of all blocks to their original configurations.
         """
         for i, block in enumerate(self.blocks):
-            original_dag = self.modify_dag(layer_index=i, dag=self.original_dag)
             for head in block.mha.heads:
-                head.dag_mod = original_dag
+                head.dag_mod = self.original_dag
 
-    def forward(self, X: torch.Tensor, targets: Optional[torch.Tensor] = None, shuffling: bool = False) -> Union[
+    def forward(self, X: torch.Tensor, mask: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None,
+                shuffling: bool = False) -> Union[
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor, Dict]]:
         """
         Processes input through the model, applying shuffling if specified.
@@ -352,13 +367,12 @@ class CaT(nn.Module):
         if shuffling:
             # Shuffle X, targets, and the DAG using the shuffler function
             X, shuffled_dag, targets, shuffle_ordering = shuffler(X, targets, self.original_dag.clone().cpu().numpy())
-            shuffled_dag = torch.tensor(shuffled_dag, dtype=torch.float, device=self.device)
+            shuffled_dag = torch.tensor(shuffled_dag, dtype=torch.float32, device=self.device)
 
             # Apply the shuffled DAG to each block
             for i, block in enumerate(self.blocks):
-                updated_dag = self.modify_dag(i, shuffled_dag)
                 for head in block.mha.heads:
-                    head.dag_mod = updated_dag
+                    head.dag_mod = shuffled_dag
             self.was_shuffled = True  # Mark that we have shuffled in this pass
         else:
             if self.was_shuffled:
@@ -366,26 +380,27 @@ class CaT(nn.Module):
                 self.reset_dags()
                 self.was_shuffled = False  # Reset the shuffling flag as we have reverted to the original DAG
             shuffle_ordering = np.arange(X.shape[1])
-
+        X_emb = self.embedding(X)
+        Y = self.y_0
         for block in self.blocks:
-            X = block(X)
+            Y = block(X_emb, Y)
 
-        X = self.lm_head(X)
-
+        Y = self.lm_head(Y)
         if targets is None:
             for i, var_name in enumerate(self.orig_var_name_ordering):
 
                 var_type = self.var_types[var_name]
                 idx = shuffle_ordering[i]
                 if var_type == 'cont':
-                    X[:, idx] = X[:, idx]
+                    Y[:, idx] = Y[:, idx]
                 elif var_type == 'bin':
-                    X[:, idx] = torch.sigmoid(X[:, idx])
-            return X
+                    Y[:, idx] = torch.sigmoid(Y[:, idx])
+            if mask:
+                Y = Y * mask
+            return Y
         else:
-            loss, loss_tracker = self.loss_func(X, targets, shuffle_ordering)
-            return X, loss, loss_tracker
-
+            loss, loss_tracker = self.loss_func(Y, targets, shuffle_ordering)
+            return Y, loss, loss_tracker
 
 
 class MixedLoss(nn.Module):

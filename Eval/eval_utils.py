@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 from CaT.datasets import reorder_dag, get_full_ordering
-from CaT.test_model import CaT
+from CaT.model import CaT
 
 from CFCN.test_model import CFCN
 from CFCN.model import CFCN as OldCFCN
