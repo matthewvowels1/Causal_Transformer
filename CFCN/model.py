@@ -141,7 +141,7 @@ class CFCN(nn.Module):
             mask (np.ndarray): Mask to apply to the linear layers.
         """
 
-        for i, layer in enumerate(self.input_layers):
+        for i, layer in enumerate(self.layers):
             if i == 0:
                 layer.set_mask(mask)
             else:
