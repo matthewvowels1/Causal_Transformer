@@ -154,8 +154,8 @@ class MultiHeadAttention(nn.Module):
         """
         out = torch.cat([h(X, Y) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
         out = self.projection(out)
-        out = self.dropout(out)  # B, T, input_dim
         out = self.act(out)
+        out = self.dropout(out)  # B, T, input_dim
         return out
 
 
