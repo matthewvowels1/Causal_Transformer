@@ -91,17 +91,18 @@ def get_batch(train_data, val_data, split, device, batch_size):
 
 
 def train_model(model, train_data, val_data, device, shuffling=0, max_iters=5000, eval_interval=500, eval_iters=1,
-                learning_rate=2e-4, batch_size=32):
+                learning_rate=2e-4, batch_size=32, use_scheduler=True):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-    def lr_lambda(epoch):
-        if epoch < warmup_iters:
-            return float(epoch) / float(max(1, warmup_iters))
-        return 1.0
+    if use_scheduler:
+        def lr_lambda(epoch):
+            if epoch < warmup_iters:
+                return float(epoch) / float(max(1, warmup_iters))
+            return 1.0
 
-    warmup_iters = max_iters // 5  # Number of iterations for warmup
-    scheduler_warmup = LambdaLR(optimizer, lr_lambda=lr_lambda)
-    scheduler_cyclic = CosineAnnealingLR(optimizer, T_max=max_iters - warmup_iters)
+        warmup_iters = max_iters // 5  # Number of iterations for warmup
+        scheduler_warmup = LambdaLR(optimizer, lr_lambda=lr_lambda)
+        scheduler_cyclic = CosineAnnealingLR(optimizer, T_max=max_iters - warmup_iters)
 
     def to_torch_device(data):
         if not isinstance(data, torch.Tensor):
@@ -129,10 +130,11 @@ def train_model(model, train_data, val_data, device, shuffling=0, max_iters=5000
         loss.backward()
         optimizer.step()
 
-        if iter_ < warmup_iters:
-            scheduler_warmup.step()
-        else:
-            scheduler_cyclic.step()
+        if use_scheduler:
+            if iter_ < warmup_iters:
+                scheduler_warmup.step()
+            else:
+                scheduler_cyclic.step()
 
         if iter_ % eval_interval == 0:  # evaluate the loss (no gradients)
             for key in loss_dict.keys():
