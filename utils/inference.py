@@ -3,6 +3,7 @@ import torch
 import warnings
 
 def predict(model, data, device):
+    model.eval()
     data = torch.from_numpy(data).float().to(device)
     return model.forward(data)
 
