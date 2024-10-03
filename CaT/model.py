@@ -136,16 +136,7 @@ class MultiHeadAttention(nn.Module):
 
         self.projection = nn.Linear(int(head_size * num_heads), input_dim, bias=True)
         self.dropout = nn.Dropout(dropout_rate)
-        activation_map = {
-            'Swish': SwishAct(),
-            'ReLU': ReLUAct(),
-            'tanh': TanhAct(),
-            'Ident': IdentAct(),
-            'Mish': MishAct(),
-            'LeakyReLU': LeakyReLUAct(),
-        }
 
-        self.act = activation_map.get(self.activation_function, None)
         self.to(self.device)
 
     def forward(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
@@ -154,7 +145,6 @@ class MultiHeadAttention(nn.Module):
         """
         out = torch.cat([h(X, Y) for h in self.heads], dim=-1)  # B, T, num_heads * head_size
         out = self.projection(out)
-        out = self.act(out)
         out = self.dropout(out)  # B, T, input_dim
         return out
 
