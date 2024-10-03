@@ -218,9 +218,9 @@ class Block(nn.Module):
         self.ff = FF(input_dim=input_dim, ff_n_embed=self.ff_n_embed, dropout_rate=dropout_rate,
                      activation_function=self.activation_function)
         if use_batch_norm:
-            self.batch_norm = nn.BatchNorm1d(num_features=input_n_var)
+            self.batch_norms = nn.ModuleList(nn.BatchNorm1d(num_features=input_n_var) for _ in range(2))
         else:
-            self.batch_norm = None
+            self.batch_norms = None
         if isinstance(dag, torch.Tensor):
             dag = dag.clone().detach()
         else:
@@ -232,12 +232,13 @@ class Block(nn.Module):
         """
         Forward pass for the Block module.
         """
-        mha_out = self.mha(X, Y)
-        ff_out = self.ff(mha_out)
-        mha_out = mha_out + ff_out
+        mha_out = self.mha(X, Y) + Y
+        if self.batch_norms is not None:
+            mha_out = self.batch_norms[0](mha_out)
+        ff_out = self.ff(mha_out) + mha_out
         if self.batch_norm is not None:
-            mha_out = self.batch_norm(mha_out)
-        return mha_out
+            ff_out = self.batch_norms[1](ff_out)
+        return ff_out
 
 
 class DynamicLinearEmbedding(nn.Module):
