@@ -5,48 +5,7 @@ from CaT.datasets import reorder_dag
 from utils.inference import CausalInference
 from loader import load_JOBS
 import torch
-from Eval.eval_utils import train_model, instantiate_CaT, instantiate_new_CFCN, instantiate_old_CFCN
-
-from numpy.typing import NDArray
-
-
-def safe_mean(arr):
-    if len(arr) == 0 or np.all(np.isnan(arr)):
-        return 0
-    return np.nanmean(arr)
-
-
-def policy_val(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
-               y: NDArray[np.float_], t: NDArray[np.int_]) -> float:
-    # ypred, y and t should be RCT
-    # Adapted from https://github.com/clinicalml/cfrnet/
-    # Determine where ypred1 is better than ypred0
-    better_pred = ypred1 > ypred0
-
-    # Mean outcome for treated group (t == 1) where ypred1 > ypred0
-    y1_mean = safe_mean(y[(t == 1) & better_pred])
-
-    # Mean outcome for control group (t == 0) where ypred1 <= ypred0
-    y0_mean = safe_mean(y[(t == 0) & ~better_pred])
-
-    # Proportion of times ypred1 is better than ypred0
-    p_fx1 = safe_mean(better_pred)
-
-    # Calculate policy risk (1 - policy value)
-    policy_risk = 1 - (y1_mean * p_fx1 + y0_mean * (1 - p_fx1))
-
-    return policy_risk
-
-
-def compute_eatt(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
-                 y: NDArray[np.float_], t: NDArray[np.int_]) -> float:
-    # ypred, y and t should be RCT
-
-    true_att = safe_mean(y[t == 1]) - safe_mean(y[t == 0])
-
-    estimated_att = safe_mean(ypred1[t == 1] - ypred0[t == 1])
-
-    return abs(true_att - estimated_att)
+from Eval.eval_utils import train_model, instantiate_CaT, policy_val, compute_eatt
 
 
 def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0):

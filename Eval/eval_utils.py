@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.typing import NDArray
 import torch
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 from CaT.datasets import reorder_dag, get_full_ordering
@@ -187,3 +188,44 @@ def compute_result(input_path='output.txt', output_path='result.txt'):
     with open(output_path, "w") as file:
         for index, values in datas.items():
             file.write(f"{index}: {np.mean(values):.3f} +- {np.std(values):.3f}  n={len(values)}\n")
+
+
+
+
+def safe_mean(arr):
+    if len(arr) == 0 or np.all(np.isnan(arr)):
+        return 0
+    return np.nanmean(arr)
+
+
+def policy_val(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
+               y: NDArray[np.float_], t: NDArray[np.int_]) -> float:
+    # ypred, y and t should be RCT
+    # Adapted from https://github.com/clinicalml/cfrnet/
+    # Determine where ypred1 is better than ypred0
+    better_pred = ypred1 > ypred0
+
+    # Mean outcome for treated group (t == 1) where ypred1 > ypred0
+    y1_mean = safe_mean(y[(t == 1) & better_pred])
+
+    # Mean outcome for control group (t == 0) where ypred1 <= ypred0
+    y0_mean = safe_mean(y[(t == 0) & ~better_pred])
+
+    # Proportion of times ypred1 is better than ypred0
+    p_fx1 = safe_mean(better_pred)
+
+    # Calculate policy risk (1 - policy value)
+    policy_risk = 1 - (y1_mean * p_fx1 + y0_mean * (1 - p_fx1))
+
+    return policy_risk
+
+
+def compute_eatt(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
+                 y: NDArray[np.float_], t: NDArray[np.int_]) -> float:
+    # ypred, y and t should be RCT
+
+    true_att = safe_mean(y[t == 1]) - safe_mean(y[t == 0])
+
+    estimated_att = safe_mean(ypred1[t == 1] - ypred0[t == 1])
+
+    return abs(true_att - estimated_att)
