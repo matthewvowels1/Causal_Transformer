@@ -121,7 +121,7 @@ class CFCN(nn.Module):
         other_layer_mask = first_layer_mask + np.eye(first_layer_mask.shape[0], dtype=np.float32)
         self.layers = nn.ModuleList(
             [MaskedLinear(self.neurons_per_layer[i], self.neurons_per_layer[i + 1],
-                          use_bias=(i != 0),
+                          use_bias=True,
                           mask=first_layer_mask if i == 0 else other_layer_mask,
                           device=self.device)
              for i in range(len(self.neurons_per_layer) - 1)])
