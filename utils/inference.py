@@ -53,6 +53,10 @@ class CausalInference():
                 UserWarning
             )
 
+    def get(self, data, var_name):
+        index = list(self.dag.nodes()).index(var_name)
+        return data[:, index]
+
 
     def forward(self, data, intervention_nodes_vals=None):
         '''
@@ -91,9 +95,11 @@ class CausalInference():
             # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
             min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
             for i, var in enumerate(list(self.dag.nodes())):
-                if self.ordering[var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
+                if self.ordering[
+                    var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
                     # generate predictions , updating the input dataset each time
-                    preds = predict(model=self.model, data=Dprime, device=self.device)[:,i]  # get prediction for each variable
+                    preds = predict(model=self.model, data=Dprime, device=self.device)[:,
+                            i]  # get prediction for each variable
                     if i in indices_to_update:
                         Dprime[:, i] = preds.detach().cpu().numpy()
                         if self.mask is not None:  # apply the mask to the predictions
