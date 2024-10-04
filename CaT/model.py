@@ -226,7 +226,7 @@ class Block(nn.Module):
         if self.batch_norms is not None:
             mha_out = self.batch_norms[0](mha_out)
         ff_out = self.ff(mha_out) + mha_out
-        if self.batch_norm is not None:
+        if self.batch_norms is not None:
             ff_out = self.batch_norms[1](ff_out)
         return ff_out
 
