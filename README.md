@@ -1,11 +1,8 @@
-# Causal_Transformer: CaTs and DAGs 🐱🐶
+# CaTs and DAGs 🐱🐶
 
 ### Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions
 
-**Authors**:  
-- Vowels, M.J.  
-- Rochat, M.  
-- Akbari, S.
+**Authors**: Vowels, M.J., Rochat, M., Akbari, S.
 
 ---
 
