@@ -117,7 +117,7 @@ def load_JOBS(path='data', random_state=0, version=0):
     train = (xtr, ttr, ytr, etr)
     test = (xte, tte, yte, ete)
 
-    print("Data loaded: [X t y e]")
+    #print("Data loaded: [X t y e]")
 
     return train, test, contfeats, bin_feats
 

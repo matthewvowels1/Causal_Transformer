@@ -45,32 +45,28 @@ def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0)
                 # Apply the permutation
                 permuted = concatenated[:, perm_map]
 
-                # Expand along a new dimension
-                final_output = np.expand_dims(permuted, axis=2)
-
-                return final_output
+                return permuted
 
             train = preprocess(train)
             test = preprocess(test)
 
             model = model_constructor(device=device, var_types=var_types, DAGnx=DAGnx)
 
-            train_model(model=model, train=train[:, :-1, :], test=test[:, :-1, :], device=device)
+            train_model(model=model, train_data=train[:, :-1], val_data=test[:, :-1], device=device)
 
             for name_split, split in {'train': train, 'test': test}.items():
                 # take only RCT
-                split = split[split[:, -1, 0] == 1][:, :-1, :]
+                split = split[split[:, -1] == 1][:, :-1]
                 ci = CausalInference(model=model, device=device)
 
                 D0 = ci.forward(data=split, intervention_nodes_vals={'t': 0})
                 D1 = ci.forward(data=split, intervention_nodes_vals={'t': 1})
 
-                output0 = D0[:, -1, :].reshape([-1])
-                output1 = D1[:, -1, :].reshape([-1])
+                output0 = ci.get(D0, 'y')
+                output1 = ci.get(D1, 'y')
 
-                R = policy_val(ypred1=output1, ypred0=output0, y=split[:, -1, 0], t=split[:, -2, 0])
-                eatt = compute_eatt(ypred1=output1, ypred0=output0, y=split[:, -1, 0], t=split[:, -2, 0])
-
+                R = policy_val(ypred1=output1, ypred0=output0, y=ci.get(split,'y'), t=ci.get(split,'t'))
+                eatt = compute_eatt(ypred1=output1, ypred0=output0, y=ci.get(split,'y'), t=ci.get(split,'t'))
 
                 file.write(f"random_state: {random_state}\nsplit: {name_split}\nrisk: {R}\neatt: {eatt}\n")
 
