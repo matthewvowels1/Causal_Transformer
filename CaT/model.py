@@ -1,10 +1,13 @@
 import torch
+from requests.packages import target
 # from scipy.special import gradient
 from torch.nn import functional as F
 import torch.nn as nn
 import networkx as nx
 import numpy as np
 from typing import Optional, Dict, List, Tuple, Union
+
+from triton.language import tensor
 
 
 # 1. introduce dag into attention [DONE]
@@ -226,7 +229,7 @@ class Block(nn.Module):
         if self.batch_norms is not None:
             mha_out = self.batch_norms[0](mha_out)
         ff_out = self.ff(mha_out) + mha_out
-        if self.batch_norm is not None:
+        if self.batch_norms is not None:
             ff_out = self.batch_norms[1](ff_out)
         return ff_out
 
@@ -238,6 +241,8 @@ class DynamicLinearEmbedding(nn.Module):
 
     def forward(self, X):
         # print(f"Dynamic lin Emb X:{X}")
+        if X.dim() == 2:
+            X = X.unsqueeze(-1)
         return torch.stack([self.linear_layers[i](X[:, i, :]) for i in range(X.shape[-2])], dim=-2)
 
 
@@ -353,7 +358,6 @@ class CaT(nn.Module):
         Returns:
             torch.Tensor or tuple: Output tensor or tuple of output, loss, and loss tracker if targets provided.
         """
-
         shuffle_ordering = None
         if shuffling:
             # Shuffle X, targets, and the DAG using the shuffler function
@@ -377,6 +381,8 @@ class CaT(nn.Module):
             Y = block(X_emb, Y)
 
         Y = self.lm_head(Y)
+        if X.dim()==2:
+            Y = torch.squeeze(Y, -1)
         if targets is None:
             for i, var_name in enumerate(self.orig_var_name_ordering):
 
