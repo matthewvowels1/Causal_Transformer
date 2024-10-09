@@ -12,3 +12,4 @@ def load_IHDP(path="IHDP/", replication=1, split='train'):
     z[:, 13] -= 1
 
     return z, x, y, y1, y0
+
