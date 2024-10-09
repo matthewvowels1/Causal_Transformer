@@ -83,7 +83,6 @@ def instantiate_CaT(device,
     return model
 
 
-
 def get_batch(train_data, val_data, split, device, batch_size):
     data = train_data if split == 'train' else val_data
     ix = torch.randint(0, len(data), (batch_size,))
@@ -91,7 +90,7 @@ def get_batch(train_data, val_data, split, device, batch_size):
     return x.to(device)
 
 
-def train_model(model, train_data, val_data, device, shuffling=0, max_iters=5000, eval_interval=500, eval_iters=1,
+def train_model(model, train_data, val_data, device, shuffling=0, max_iters=10000, eval_interval=500, eval_iters=20,
                 learning_rate=2e-4, batch_size=32, use_scheduler=True):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
@@ -162,6 +161,7 @@ def train_model(model, train_data, val_data, device, shuffling=0, max_iters=5000
                 f"step {iter_} of {max_iters}: train_loss {eval_loss['train']:.4f}, val_loss {eval_loss['val']:.4f}")
     model.eval()
 
+
 def compute_result(input_path='output.txt', output_path='result.txt'):
     with open(input_path, 'r') as file:
         lines = file.readlines()
@@ -188,8 +188,6 @@ def compute_result(input_path='output.txt', output_path='result.txt'):
     with open(output_path, "w") as file:
         for index, values in datas.items():
             file.write(f"{index}: {np.mean(values):.3f} +- {np.std(values):.3f}  n={len(values)}\n")
-
-
 
 
 def safe_mean(arr):
@@ -229,3 +227,14 @@ def compute_eatt(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
     estimated_att = safe_mean(ypred1[t == 1] - ypred0[t == 1])
 
     return abs(true_att - estimated_att)
+
+
+def compute_eate(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
+                 y1: NDArray[np.float_], y0: NDArray[np.float_]) -> dict:
+    # ypred, y and t should be RCT
+
+    true_ate = safe_mean(y1 - y0)
+
+    estimated_ate = safe_mean(ypred1 - ypred0)
+
+    return {'eate': abs(true_ate - estimated_ate), 'estimated ate': estimated_ate}
