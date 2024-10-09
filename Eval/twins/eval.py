@@ -2,17 +2,19 @@ import networkx as nx
 import torch
 import numpy as np
 
-from Eval.eval_utils import train_model, compute_eatt, instantiate_CaT, instantiate_old_CFCN
+from Eval.eval_utils import train_model, compute_eatt, instantiate_CaT, instantiate_old_CFCN, compute_eate
 from Eval.twins.loader import load_twins
 from utils.inference import CausalInference
 from utils.utils import reorder_dag
 
 
-def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0):
+def evaluate(model_constructor, device='cuda', seed=0):
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
-    df, var_types = load_twins(data_format='pandas')
+    df, var_types = load_twins(data_format='pandas', return_y0_y1=True)
+    y0, y1 = df['y0'], df['y1']
+    df.drop(['y0', 'y1'], axis='columns', inplace=True)
     var_names = df.columns.to_list()
 
     data = df.to_numpy()
@@ -41,17 +43,22 @@ def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0)
 
     train_model(model=model, train_data=train, val_data=test, device=device)
 
-    with open(output_path, "w") as file:
-        for name_split, split in {'train': train, 'test': test}.items():
-            ci = CausalInference(model=model, device=device)
+    results = {}
 
-            D0 = ci.forward(data=split, intervention_nodes_vals={'t': 0})
-            D1 = ci.forward(data=split, intervention_nodes_vals={'t': 1})
+    for name_split, split in {'train': train, 'test': test}.items():
+        ci = CausalInference(model=model, device=device)
 
-            output0 = ci.get(D0, 'y')
-            output1 = ci.get(D1, 'y')
+        D0 = ci.forward(data=split, intervention_nodes_vals={'t': 0})
+        D1 = ci.forward(data=split, intervention_nodes_vals={'t': 1})
 
-            eatt = compute_eatt(ypred1=output1, ypred0=output0, y=ci.get(split, 'y'), t=ci.get(split, 't'))
-            file.write(f"split: {name_split}\neatt: {eatt}\n\n")
+        output0 = ci.get(D0, 'y')
+        output1 = ci.get(D1, 'y')
+
+        results.update({f"{name_split} {key}": value for key, value in
+                        compute_eate(ypred1=output1, ypred0=output0, y0=y0, y1=y1).items()})
+
+    return results
+
+
 if __name__ == "__main__":
     evaluate(instantiate_old_CFCN)

@@ -29,29 +29,22 @@ import pandas as pd
 
 
 def load_twins(datapath="data/twins.csv", data_format='numpy',
-               return_sketchy_ites=False, return_sketchy_ate=False):
+               return_y0_y1=False):
     """
     Load the Twins dataset
 
     :param datapath: path to folder for data
-    :param return_sketchy_ites: if True, return sketchy ITEs
-    :param return_sketchy_ate: if True, return sketchy ATE
-    :return: dictionary of results
+    :param return_y0_y1: if True, return y0 and y1 in the df
+    :return: df and var_types
     """
 
     assert data_format in ('numpy', 'pandas'), f"unknown data format {data_format}, should be numpy or pandas"
 
     full_df = pd.read_csv(datapath, index_col=0)
 
-    new_df = full_df.drop(['y0', 'y1', 'y_cf', 'Propensity'], axis='columns').rename(columns={'T': 't', 'yf': 'y'})
+    removed_columns = ['y_cf', 'Propensity'] if return_y0_y1 else ['y0', 'y1', 'y_cf', 'Propensity']
+    new_df = full_df.drop(removed_columns, axis='columns').rename(columns={'T': 't', 'yf': 'y'})
 
-    if return_sketchy_ites or return_sketchy_ate:
-        ites = full_df['y1'] - full_df['y0']
-        ites_np = ites.to_numpy()
-        if return_sketchy_ites:
-            new_df['ites'] = ites
-        if return_sketchy_ate:
-            new_df['ate'] = ites_np.mean()
 
     if data_format == 'numpy':
         new_df.to_numpy()
@@ -139,7 +132,8 @@ def load_twins(datapath="data/twins.csv", data_format='numpy',
 
 
 if __name__ == "__main__":
-    df, var_types = load_twins(data_format='pandas', return_sketchy_ate=True, return_sketchy_ites=True)
+    df, var_types = load_twins(data_format='pandas')
+    print(df.shape)
     print(df.columns)
 
     print(df[['bord','y','t']][:10])
