@@ -57,16 +57,16 @@ def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0)
             for name_split, split in {'train': train, 'test': test}.items():
                 # take only RCT
                 split = split[split[:, -1] == 1][:, :-1]
-                ci = CausalInference(model=model, device=device)
+                ci = CausalInference(dag=DAGnx)
 
-                D0 = ci.forward(data=split, intervention_nodes_vals={'t': 0})
-                D1 = ci.forward(data=split, intervention_nodes_vals={'t': 1})
+                D0 = ci.forward(data=split, model=model, intervention_nodes_vals={'t': 0})
+                D1 = ci.forward(data=split, model=model, intervention_nodes_vals={'t': 1})
 
                 output0 = ci.get(D0, 'y')
                 output1 = ci.get(D1, 'y')
 
-                R = policy_val(ypred1=output1, ypred0=output0, y=ci.get(split,'y'), t=ci.get(split,'t'))
-                eatt = compute_eatt(ypred1=output1, ypred0=output0, y=ci.get(split,'y'), t=ci.get(split,'t'))
+                R = policy_val(ypred1=output1, ypred0=output0, y=ci.get(split, 'y'), t=ci.get(split, 't'))
+                eatt = compute_eatt(ypred1=output1, ypred0=output0, y=ci.get(split, 'y'), t=ci.get(split, 't'))
 
                 file.write(f"random_state: {random_state}\nsplit: {name_split}\nrisk: {R}\neatt: {eatt}\n")
 

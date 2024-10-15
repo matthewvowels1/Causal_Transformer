@@ -177,3 +177,28 @@ def get_full_ordering(DAG):
                     ordering_info[var_name] = parent_var_order + 1
 
     return ordering_info
+
+def remove_incoming_edges(graph, target_node='X'):
+    """
+    Creates a copy of the graph, removes all incoming edges to a specified node, and returns the modified graph.
+
+    Args:
+        graph (nx.DiGraph): A directed graph.
+        target_node: The node for which all incoming edges should be removed.
+
+    Returns:
+        nx.DiGraph: A copy of the original graph with the specified modifications.
+    """
+    # Create a copy of the graph to avoid modifying the original
+    modified_graph = graph.copy()
+
+    # Check if the target node is in the graph
+    if target_node not in modified_graph:
+        print(f"Node {target_node} not found in the graph.")
+        return None
+
+    # List of all incoming edges to the target node
+    incoming_edges = list(modified_graph.in_edges(target_node))
+
+    modified_graph.remove_edges_from(incoming_edges)
+    return modified_graph

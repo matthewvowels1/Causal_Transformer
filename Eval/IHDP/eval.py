@@ -8,6 +8,7 @@ from utils.inference import CausalInference
 from loader import load_IHDP
 import torch
 
+
 def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0):
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
@@ -29,10 +30,9 @@ def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0)
 
     with open(output_path, "w") as file:
         for i in range(1, 101):
-            model = model_constructor(device=device, var_types=var_types, DAGnx= DAGnx)
+            model = model_constructor(device=device, var_types=var_types, DAGnx=DAGnx)
             dataset = {}
             true_ite = {}
-
 
             for split in ('train', 'test'):
                 z, x, y, y1, y0 = load_IHDP(path="data/", replication=i, split=split)
@@ -45,10 +45,10 @@ def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0)
             train_model(model=model, train_data=dataset['train'], val_data=dataset['test'], device=device)
 
             for split in ('train', 'test'):
-                ci = CausalInference(model=model, device=device)
+                ci = CausalInference(dag=DAGnx)
 
-                D0 = ci.forward(data=dataset[split], intervention_nodes_vals={'x': 0})
-                D1 = ci.forward(data=dataset[split], intervention_nodes_vals={'x': 1})
+                D0 = ci.forward(data=dataset[split], model=model, intervention_nodes_vals={'x': 0})
+                D1 = ci.forward(data=dataset[split], model=model, intervention_nodes_vals={'x': 1})
 
                 output0 = ci.get(D0, 'y')
                 output1 = ci.get(D1, 'y')
@@ -61,6 +61,7 @@ def evaluate(model_constructor, output_path='output.txt', device='cuda', seed=0)
                 eate = np.abs(true_ite[split].mean() - est_ate)
 
                 file.write(f"i: {i}\nsplit: {split}\npehe: {pehe}\neate: {eate}\n")
+
 
 if __name__ == "__main__":
     evaluate(instantiate_CaT)

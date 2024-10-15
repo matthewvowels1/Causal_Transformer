@@ -46,10 +46,10 @@ def evaluate(model_constructor, device='cuda', seed=0):
     results = {}
 
     for name_split, split in {'train': train, 'test': test}.items():
-        ci = CausalInference(model=model, device=device)
+        ci = CausalInference(dag=DAGnx)
 
-        D0 = ci.forward(data=split, intervention_nodes_vals={'t': 0})
-        D1 = ci.forward(data=split, intervention_nodes_vals={'t': 1})
+        D0 = ci.forward(data=split, model=model, intervention_nodes_vals={'t': 0})
+        D1 = ci.forward(data=split, model=model, intervention_nodes_vals={'t': 1})
 
         output0 = ci.get(D0, 'y')
         output1 = ci.get(D1, 'y')

@@ -2,48 +2,15 @@ import networkx as nx
 import torch
 import warnings
 
-def predict(model, data, device):
-    model.eval()
-    data = torch.from_numpy(data).float().to(device)
-    return model.forward(data)
 
-
-def remove_incoming_edges(graph, target_node='X'):
-    """
-    Creates a copy of the graph, removes all incoming edges to a specified node, and returns the modified graph.
-
-    Args:
-        graph (nx.DiGraph): A directed graph.
-        target_node: The node for which all incoming edges should be removed.
-
-    Returns:
-        nx.DiGraph: A copy of the original graph with the specified modifications.
-    """
-    # Create a copy of the graph to avoid modifying the original
-    modified_graph = graph.copy()
-
-    # Check if the target node is in the graph
-    if target_node not in modified_graph:
-        print(f"Node {target_node} not found in the graph.")
-        return None
-
-    # List of all incoming edges to the target node
-    incoming_edges = list(modified_graph.in_edges(target_node))
-
-    modified_graph.remove_edges_from(incoming_edges)
-    return modified_graph
-
-
-class CausalInference():
-    def __init__(self, model, device, mask=None):
+class CausalInference:
+    def __init__(self, dag, mask=None):
         '''
-        Using the CaT, this model iterates through the causally-constrained attention according to an intervention and some data
-        :param model: causal transformer CaT pytorch model
+        This class implements utilities for handling dag datasets, and performing causal inference.
+        :param dag: DagNX directed acyclic graph to use.
+        :param mask: Optional mask to apply to the dataset.
         '''
-        self.model = model
-        self.dag = self.model.nxdag
-        self.ordering = self.model.causal_ordering
-        self.device = device
+        self.dag = dag
         self.mask = mask
 
         if self.mask is None:
@@ -57,27 +24,29 @@ class CausalInference():
         index = list(self.dag.nodes()).index(var_name)
         return data[:, index]
 
+    def apply_intervention(self, data, intervention_nodes_vals: dict):
+        data_copy = data.copy()
+        if intervention_nodes_vals:
+            for var_name, val in intervention_nodes_vals.items():
+                index = list(self.dag.nodes()).index(var_name)
+                data_copy[:, index] = val
+            if self.mask is not None:
+                data_copy = data_copy * self.mask
+        return data_copy
 
-    def forward(self, data, intervention_nodes_vals=None):
+    def forward(self, data, model, intervention_nodes_vals=None):
         '''
         This function iterates through the causally-constrained attention according to the dag and a desired intervention
-        :param data is dataset (numpy) to accompany the desired interventions (necessary for the variables which are not downstream of the intervention nodes). Assumed ordering is topological.
+        :param data: is dataset (numpy) to accompany the desired interventions (necessary for the variables which are not downstream of the intervention nodes). Assumed ordering is topological.
+        :param model: is a nn.Module model to use for the forward method
         :param intervention_nodes_vals: dictionary of variable names as strings for intervention with corresponding intervention values
         :return: an updated dataset with new values including interventions and effects
         '''
 
-        if intervention_nodes_vals is not None:
-            Dprime = data.copy()
+        model.eval()
 
-            # modify the dataset with the desired intervention values
-            for var_name in intervention_nodes_vals.keys():
-                val = intervention_nodes_vals[var_name]
-                index = list(self.dag.nodes()).index(var_name)
-                Dprime[:, index] = val
-
-            if self.mask is not None:
-                Dprime = Dprime * self.mask
-
+        if intervention_nodes_vals:
+            Dprime = self.apply_intervention(data, intervention_nodes_vals)
 
             # find all descendants of intervention variables which are not in intervention set
             all_descs = []
@@ -90,12 +59,13 @@ class CausalInference():
             # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
             for i, var in enumerate(list(self.dag.nodes())):
                 if var in vars_to_update:
-                    preds = predict(model=self.model, data=Dprime, device=self.device)[:,i]
-                    Dprime[:, i] = preds.detach().cpu().numpy()
+                    preds = model.forward(torch.from_numpy(Dprime).float().to(model.device))
+                    Dprime[:, i] = preds[:, i].detach().cpu().numpy()
                     if self.mask is not None:  # apply the mask to the predictions
                         Dprime = Dprime * self.mask
         else:
-            Dprime = predict(model=self.model, data=data, device=self.device).detach().cpu().numpy()
+            preds = model.forward(torch.from_numpy(data).float().to(model.device))
+            Dprime = preds.detach().cpu().numpy()
             if self.mask is not None:  # apply the mask to the predictions
                 Dprime = Dprime * self.mask
 
