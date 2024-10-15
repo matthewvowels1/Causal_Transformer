@@ -86,24 +86,14 @@ class CausalInference():
                 all_descs.append(descs)
             all_descs = [item for sublist in all_descs for item in sublist]
             vars_to_update = set(all_descs) - set(intervention_nodes_vals.keys())
-            # get corresponding column indexes
-            indices_to_update = []
-            for var_name in vars_to_update:
-                index = list(self.dag.nodes()).index(var_name)
-                indices_to_update.append(list(self.dag.nodes()).index(var_name))
 
             # iterate through the dataset / predictions, updating the input dataset each time, where appropriate
-            min_int_order = min([self.ordering[var] for var in intervention_nodes_vals.keys()])
             for i, var in enumerate(list(self.dag.nodes())):
-                if self.ordering[
-                    var] >= min_int_order:  # start at the causal ordering at least as high as the lowest order of the intervention variable
-                    # generate predictions , updating the input dataset each time
-                    preds = predict(model=self.model, data=Dprime, device=self.device)[:,
-                            i]  # get prediction for each variable
-                    if i in indices_to_update:
-                        Dprime[:, i] = preds.detach().cpu().numpy()
-                        if self.mask is not None:  # apply the mask to the predictions
-                            Dprime = Dprime * self.mask
+                if var in vars_to_update:
+                    preds = predict(model=self.model, data=Dprime, device=self.device)[:,i]
+                    Dprime[:, i] = preds.detach().cpu().numpy()
+                    if self.mask is not None:  # apply the mask to the predictions
+                        Dprime = Dprime * self.mask
         else:
             Dprime = predict(model=self.model, data=data, device=self.device).detach().cpu().numpy()
             if self.mask is not None:  # apply the mask to the predictions
