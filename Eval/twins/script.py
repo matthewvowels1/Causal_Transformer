@@ -15,18 +15,12 @@ seeds = range(10)
 output_path = 'results/results.txt'
 
 if os.path.exists(output_path):
-   raise FileExistsError(output_path)
+    raise FileExistsError(output_path)
 
-
-def compute(seeds, model_constructor):
-    results = [evaluate(model_constructor=model_constructor,
-                        seed=seed) for seed in seeds]
-    proper_dict = {key: [d[key] for d in results] for key in results[0]}
-    return proper_dict
 
 
 for model in models:
-    proper_dict = compute(seeds=seeds, model_constructor=models_methods[model])
+    proper_dict = evaluate(seeds=seeds, model_constructor=models_methods[model])
     with open(output_path, "a") as file:
         file.write(f"\nmodel: {model}\nseeds: {seeds}\n")
         for name, values in proper_dict.items():

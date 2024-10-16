@@ -1,139 +1,107 @@
+"""GANITE Codebase.
+
+Reference: Jinsung Yoon, James Jordon, Mihaela van der Schaar,
+"GANITE: Estimation of Individualized Treatment Effects using Generative Adversarial Nets",
+International Conference on Learning Representations (ICLR), 2018.
+
+Paper link: https://openreview.net/forum?id=ByKWUeWA-
+
+Last updated Date: April 25th 2020
+Code author: Jinsung Yoon (jsyoon0823@gmail.com)
+
+-----------------------------
+
+data_loading.py
+
+Note: Load real-world individualized treatment effects estimation datasets
+
+(1) data_loading_twin: Load twins data.
+  - Reference: http://data.nber.org/data/linked-birth-infant-death-data-vital-statistics-data.html
 """
-File for loading the Twins semi-synthetic (treatment is simulated) dataset.
+import os
 
-Louizos et al. (2017) introduced the Twins dataset as an augmentation of the
-real data on twin births and twin mortality rates in the USA from 1989-1991
-(Almond et al., 2005). The treatment is "born the heavier twin" so, in one
-sense, we can observe both potential outcomes. Louizos et al. (2017) create an
-observational dataset out of this by hiding one of the twins (for each pair) in
-the dataset. Furthermore, to make sure the twins are very similar, they limit
-the data to the twins that are the same sex. To look at data with higher
-mortality rates, they further limit the dataset to twins that were born weighing
-less than 2 kg. To ensure there is some confounding, Louizos et al. (2017)
-simulate the treatment assignment (which twin is heavier) as a function of the
-GESTAT10 covariate, which is the number of gestation weeks prior to birth.
-GESTAT10 is highly correlated with the outcome and it seems intuitive that it
-would be a cause of the outcome, so this should simulate some confounding.
-
-References:
-
-    Almond, D., Chay, K. Y., & Lee, D. S. (2005). The costs of low birth weight.
-        The Quarterly Journal of Economics, 120(3), 1031-1083.
-
-    Louizos, C., Shalit, U., Mooij, J. M., Sontag, D., Zemel, R., & Welling, M.
-        (2017). Causal effect inference with deep latent-variable models. In
-        Advances in Neural Information Processing Systems (pp. 6446-6456).
-"""
-
-import pandas as pd
+# Necessary packages
+import numpy as np
+from scipy.special import expit
 
 
-def load_twins(datapath="data/twins.csv", data_format='numpy',
-               return_y0_y1=False):
+def load_twins():
+    """Load twins data.
+
+    Args:
+      - train_rate: the ratio of training data
+
+    Returns:
+      - train_x: features in training data
+      - train_t: treatments in training data
+      - train_y: observed outcomes in training data
+      - train_potential_y: potential outcomes in training data
+      - test_x: features in testing data
+      - test_potential_y: potential outcomes in testing data
     """
-    Load the Twins dataset
+    path = os.path.join(os.path.dirname(__file__), f"data/twins.csv")
+    # Load original data (11400 patients, 30 features, 2 dimensional potential outcomes)
+    ori_data = np.loadtxt(path, delimiter=",", skiprows=1)
 
-    :param datapath: path to folder for data
-    :param return_y0_y1: if True, return y0 and y1 in the df
-    :return: df and var_types
-    """
+    # Define features
+    x = ori_data[:, :30]
+    no, dim = x.shape
 
-    assert data_format in ('numpy', 'pandas'), f"unknown data format {data_format}, should be numpy or pandas"
+    # Define potential outcomes
+    potential_y = ori_data[:, 30:]
+    # Die within 1 year = 1, otherwise = 0
+    potential_y = np.array(potential_y < 9999, dtype=float)
 
-    full_df = pd.read_csv(datapath, index_col=0)
+    ## Assign treatment
+    coef = np.random.uniform(-0.01, 0.01, size=[dim, 1])
+    prob_temp = expit(np.matmul(x, coef) + np.random.normal(0, 0.01, size=[no, 1]))
 
-    removed_columns = ['y_cf', 'Propensity'] if return_y0_y1 else ['y0', 'y1', 'y_cf', 'Propensity']
-    new_df = full_df.drop(removed_columns, axis='columns').rename(columns={'T': 't', 'yf': 'y'})
+    prob_t = prob_temp / (2 * np.mean(prob_temp))
+    prob_t[prob_t > 1] = 1
 
+    t = np.random.binomial(1, prob_t, [no, 1])
+    t = t.reshape([no, ])
 
-    if data_format == 'numpy':
-        new_df.to_numpy()
+    ## Define observable outcomes
+    y = np.zeros([no, 1])
+    y = np.transpose(t) * potential_y[:, 1] + np.transpose(1 - t) * potential_y[:, 0]
+    y = np.reshape(np.transpose(y), [no, ])
+
+    dataset = np.concatenate((x,t[:,None], y[:, None]), axis=1)
 
     var_types = {
-        'eclamp': 'bin',
-        'gestatcat1': 'cat',
-        'gestatcat2': 'cat',
-        'gestatcat3': 'cat',
-        'gestatcat4': 'cat',
-        'gestatcat5': 'cat',
-        'gestatcat6': 'cat',
-        'gestatcat7': 'cat',
-        'gestatcat8': 'cat',
-        'gestatcat9': 'cat',
-        'gestatcat10': 'cat',
-        'gestatcat1.1': 'cat',
-        'gestatcat2.1': 'cat',
-        'gestatcat3.1': 'cat',
-        'gestatcat4.1': 'cat',
-        'gestatcat5.1': 'cat',
-        'gestatcat6.1': 'cat',
-        'gestatcat7.1': 'cat',
-        'gestatcat8.1': 'cat',
-        'gestatcat9.1': 'cat',
-        'gestatcat10.1': 'cat',
-        'gestatcat1.2': 'cat',
-        'gestatcat2.2': 'cat',
-        'gestatcat3.2': 'cat',
-        'gestatcat4.2': 'cat',
-        'gestatcat5.2': 'cat',
-        'gestatcat6.2': 'cat',
-        'gestatcat7.2': 'cat',
-        'gestatcat8.2': 'cat',
-        'gestatcat9.2': 'cat',
-        'gestatcat10.2': 'cat',
-        'bord': 'bin',
-        'othermr': 'bin',
-        'dmar': 'bin',
-        'csex': 'bin',
+        'dtotord': 'ord',
+        'anemia': 'bin',
         'cardiac': 'bin',
-        'uterine': 'bin',
         'lung': 'bin',
         'diabetes': 'bin',
         'herpes': 'bin',
-        'anemia': 'bin',
         'hydra': 'bin',
+        'hemo': 'bin',
         'chyper': 'bin',
         'phyper': 'bin',
+        'eclamp': 'bin',
         'incervix': 'bin',
         'pre4000': 'bin',
         'preterm': 'bin',
         'renal': 'bin',
         'rh': 'bin',
-        'hemo': 'bin',
-        'tobacco': 'bin',
-        'alcohol': 'bin',
-        'orfath': 'cat',
-        'adequacy': 'cat',
-        'drink5': 'cat',
-        'mpre5': 'cat',
-        'meduc6': 'cat',
-        'mrace': 'cat',
-        'ormoth': 'cat',
-        'frace': 'cat',
-        'birattnd': 'cat',
-        'stoccfipb_reg': 'cat',
-        'mplbir_reg': 'cat',
-        'cigar6': 'cat',
-        'mager8': 'cat',
+        'uterine': 'bin',
+        'othermr': 'bin',
+        'cigar': 'cat',
+        'drink': 'cat',
+        'wtgain': 'num',
         'pldel': 'cat',
-        'brstate_reg': 'cat',
-        'feduc6': 'cat',
-        'dfageq': 'cat',
-        'nprevistq': 'cat',
-        'data_year': 'cat',
-        'crace': 'cat',
-        'birmon': 'cyc',
-        'dtotord_min': 'ord',
-        'dlivord_min': 'ord',
+        'gestat': 'cat',
+        'dmage': 'num',
+        'dmeduc': 'cat',
+        'dmar': 'bin',
+        'resstatb': 'cat',
+        'mpcb': 'cat',
+        'nprevist': 'ord',
+        'adequacy': 'cat',
         't': 'bin',
-        'y': 'bin'
+        'y': 'bin',
     }
-    return new_df, var_types
 
-
-if __name__ == "__main__":
-    df, var_types = load_twins(data_format='pandas')
-    print(df.shape)
-    print(df.columns)
-
-    print(df[['bord','y','t']][:10])
+    return dataset, potential_y, var_types

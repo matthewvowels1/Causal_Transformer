@@ -1,4 +1,5 @@
 import networkx as nx
+import numpy as np
 import torch
 import warnings
 
@@ -19,6 +20,10 @@ class CausalInference:
                 "the absence of a mask may lead to incorrect results.",
                 UserWarning
             )
+
+    def remove(self, data, var_name):
+        index = list(self.dag.nodes()).index(var_name)
+        return np.delete(data, index, axis=1)
 
     def get(self, data, var_name):
         index = list(self.dag.nodes()).index(var_name)

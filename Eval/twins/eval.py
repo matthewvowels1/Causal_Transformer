@@ -1,62 +1,62 @@
+from collections import defaultdict
+
 import networkx as nx
 import torch
 import numpy as np
 
-from Eval.eval_utils import train_model, compute_eatt, instantiate_CaT, instantiate_old_CFCN, compute_eate
+from Eval.eval_utils import train_model, instantiate_old_CFCN, predict
+from utils.metrics import eate
 from Eval.twins.loader import load_twins
 from utils.inference import CausalInference
 from utils.utils import reorder_dag
 
 
-def evaluate(model_constructor, device='cuda', seed=0):
-    np.random.seed(seed=seed)
-    torch.manual_seed(seed)
+def evaluate(model_constructor, seeds=range(10), test_ratio=0.2):
+    results = defaultdict(list)
+    for seed in seeds:
+        np.random.seed(seed=seed)
+        torch.manual_seed(seed)
 
-    df, var_types = load_twins(data_format='pandas', return_y0_y1=True)
-    y0, y1 = df['y0'], df['y1']
-    df.drop(['y0', 'y1'], axis='columns', inplace=True)
-    var_names = df.columns.to_list()
+        data, y_potential, var_types = load_twins()
+        var_names = var_types.keys()
 
-    data = df.to_numpy()
+        DAGnx = nx.DiGraph()
+        # types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
 
-    DAGnx = nx.DiGraph()
-    # types can be 'cat' (categorical) 'cont' (continuous) or 'bin' (binary)
+        DAGnx.add_edges_from(
+            [(x, 't') for x in var_names if x not in ('t', 'y')] +
+            [(x, 'y') for x in var_names if x != 'y']
+        )
+        DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
 
-    DAGnx.add_edges_from(
-        [(x, 't') for x in var_names if x not in ('t', 'y')] +
-        [(x, 'y') for x in var_names if x != 'y']
-    )
-    DAGnx = reorder_dag(dag=DAGnx)  # topologically sorted dag
+        # Create a mapping from original to new order
+        perm_map = [list(var_types.keys()).index(i) for i in list(DAGnx.nodes())]
+        data = data[:, perm_map]
 
-    # Create a mapping from original to new order
-    perm_map = [list(var_types.keys()).index(i) for i in list(DAGnx.nodes())]
-    data = data[:, perm_map]
+        test_size = int(len(data) * test_ratio)
+        shuffled_idx = np.random.permutation(len(data))
+        test_idx = shuffled_idx[:test_size]
+        train_idx = shuffled_idx[test_size:]
 
-    shuffle_indices = np.random.permutation(len(data))
-    data = data[shuffle_indices]
-    split_ratio = 0.8
-    train_size = int(len(data) * split_ratio)
-    train = data[:train_size]
-    test = data[train_size:]
 
-    model = model_constructor(device=device, var_types=var_types, DAGnx=DAGnx)
+        dataset = {}
+        data_y_potential = {}
+        for name_split, split_idx in {'test': test_idx, 'train': train_idx}.items():
+            dataset[name_split] = data[split_idx]
+            data_y_potential[name_split] = y_potential[split_idx]
 
-    train_model(model=model, train_data=train, val_data=test, device=device)
-
-    results = {}
-
-    for name_split, split in {'train': train, 'test': test}.items():
         ci = CausalInference(dag=DAGnx)
 
-        D0 = ci.forward(data=split, model=model, intervention_nodes_vals={'t': 0})
-        D1 = ci.forward(data=split, model=model, intervention_nodes_vals={'t': 1})
+        model = model_constructor(DAGnx=DAGnx, var_types=var_types)
 
-        output0 = ci.get(D0, 'y')
-        output1 = ci.get(D1, 'y')
+        train_model(model=model, train=dataset['train'], test=dataset['test'], ci=ci)
 
-        results.update({f"{name_split} {key}": value for key, value in
-                        compute_eate(ypred1=output1, ypred0=output0, y0=y0, y1=y1).items()})
+        for name_split in ('train', 'test'):
+            output0 = predict(model=model, data=dataset[name_split], ci=ci, interventions_nodes={'t': 0})
+            output1 = predict(model=model, data=dataset[name_split], ci=ci, interventions_nodes={'t': 1})
 
+            results[f'eate {name_split}'].append(
+                eate(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split]))
     return results
 
 

@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import os
 
-def load_JOBS(path='data', random_state=0, version=0):
+def load_JOBS(random_state=0, version=0):
     # Reorder dimensions so continuous features are first, binary features second
     if version == 0:
         jobs_file_nsw_cont = "nswre74_control.txt"
@@ -56,6 +56,7 @@ def load_JOBS(path='data', random_state=0, version=0):
 
     jobs_file_PSID = "psid_controls.txt"
 
+    path = os.path.join(os.path.dirname(__file__), "data")
     # Load data from files
     nsw_treat = pd.read_csv(os.path.join(path, jobs_file_nsw_treat), header=None, sep="  ", engine="python")
     nsw_cont = pd.read_csv(os.path.join(path, jobs_file_nsw_cont), header=None, sep="  ", engine="python")
