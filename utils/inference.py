@@ -23,7 +23,13 @@ class CausalInference:
 
     def remove(self, data, var_name):
         index = list(self.dag.nodes()).index(var_name)
-        return np.delete(data, index, axis=1)
+        if isinstance(data, np.ndarray):
+            # If data is a NumPy array, use np.delete
+            return np.delete(data, index, axis=1)
+        elif isinstance(data, torch.Tensor):
+            return data[:, torch.arange(data.size(1)) != index]
+        else:
+            raise TypeError("Input data must be a NumPy array or a PyTorch tensor.")
 
     def get(self, data, var_name):
         index = list(self.dag.nodes()).index(var_name)
