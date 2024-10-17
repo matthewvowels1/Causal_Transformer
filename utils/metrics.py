@@ -52,7 +52,7 @@ def eate(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
 def pehe(ypred1: NDArray[np.float_], ypred0: NDArray[np.float_],
          ypotential: NDArray[np.float_]) -> dict:
     assert (ypotential.shape[1] == 2)
-    true_ite = ypotential[:, 1] - ypotential[:, 0]
-    est_ite = ypred1 - ypred0
+    true_cate = ypotential[:, 1] - ypotential[:, 0]
+    est_cate = ypred1 - ypred0
 
-    return np.sqrt(np.mean((true_ite - est_ite) ** 2))
+    return np.sqrt(np.mean((true_cate - est_cate) ** 2))
