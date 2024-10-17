@@ -86,12 +86,12 @@ def train_model(model, train, test, ci):
     if isinstance(model, nn.Module):
         hyperparam = {
             'learning_rate': 1e-3,
-            'max_iters': 1#20000
+            'max_iters': 20000
         } if isinstance(model, (CFCN, OldCFCN)) else {
             'learning_rate': 5e-3,
-            'max_iters': 1#6000
+            'max_iters': 6000
         }
-        train_module(model=model, train_data=train, val_data=test, **hyperparam)
+        train_module(model=model, train_data=train, val_data=test, ci=ci, **hyperparam)
     elif isinstance(model, sk.base.BaseEstimator):
         model.fit(X=ci.remove(train, 'y'), y=ci.get(train, 'y'))
     else:
@@ -103,11 +103,12 @@ def predict(model, data, ci: CausalInference, interventions_nodes, output_var='y
         if isinstance(model, TransformerRegressor):
             data = ci.apply_intervention(data=data, intervention_nodes_vals=interventions_nodes)
             data = ci.remove(data=data, var_name=output_var)
-            return model.forward(data)
+            return ci.forward(data = data, model=model)
         else:
             prediction = ci.forward(data=data, model=model, intervention_nodes_vals=interventions_nodes)
             return ci.get(data=prediction, var_name=output_var)
     elif isinstance(model, sk.base.BaseEstimator):
+        data = ci.apply_intervention(data=data, intervention_nodes_vals=interventions_nodes)
         return model.predict(ci.remove(data=data, var_name=output_var))
     else:
         raise ValueError(f"unexpected type {type(model)}")
@@ -120,7 +121,7 @@ def get_batch(train_data, val_data, split, device, batch_size):
     return x.to(device)
 
 
-def train_module(model, train_data, val_data, shuffling=0, max_iters=6000, eval_interval=0, eval_iters=100,
+def train_module(model, train_data, val_data, ci, shuffling=0, max_iters=6000, eval_interval=0, eval_iters=100,
                  learning_rate=5e-3, batch_size=100, use_scheduler=True):
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
@@ -152,9 +153,13 @@ def train_module(model, train_data, val_data, shuffling=0, max_iters=6000, eval_
 
         # Get a batch of data
         xb = get_batch(train_data, val_data, 'train', model.device, batch_size)
-        xb_mod = torch.clone(xb.detach())  # Create target data
 
-        X, loss, loss_dict = model(X=xb, targets=xb_mod, shuffling=shuffling)
+        if isinstance(model, TransformerRegressor):
+            ci.get(xb, 'y')
+            X, loss, loss_dict = model(X=ci.remove(xb, 'y'), targets=ci.get(xb, 'y'))
+        else:
+            xb_mod = torch.clone(xb.detach())  # Create target data
+            X, loss, loss_dict = model(X=xb, targets=xb_mod, shuffling=shuffling)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()

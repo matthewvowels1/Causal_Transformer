@@ -14,7 +14,7 @@ from baseline.transformer import TransformerRegressor
 def instantiate_rf(DAGnx,var_types):
     return RandomForestRegressor(random_state=0)
 def instantiate_transformer(DAGnx,var_types):
-    return TransformerRegressor(input_dim=len(var_types)-1)
+    return TransformerRegressor(num_variables=len(var_types)-1,input_dim=1)
 
 available_evaluations = {'ihdp': ihdp_eval, 'twins': twins_eval, 'jobs': jobs_eval}
 
@@ -24,16 +24,14 @@ available_models = {'CFCN': instantiate_old_CFCN,
                   'random forest': instantiate_rf,
                   'transformer': instantiate_transformer}
 
-evaluations = ['ihdp','twins','jobs']
-models = ['random forest', 'transformer']
+evaluations = ['ihdp']
+models = ['transformer']
 
 output_path = 'results.txt'
 
 if os.path.exists(output_path):
-    pass
-    #raise FileExistsError(output_path)
+    raise FileExistsError(output_path)
 
-warnings.simplefilter("once",UserWarning)
 
 for evaluation in evaluations:
     for model in models:
