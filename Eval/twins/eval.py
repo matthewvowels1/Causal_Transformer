@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 from Eval.eval_utils import train_model, instantiate_old_CFCN, predict
-from utils.metrics import eate
+from utils.metrics import eate, pehe
 from Eval.twins.loader import load_twins
 from utils.inference import CausalInference
 from utils.utils import reorder_dag
@@ -57,6 +57,8 @@ def evaluate(model_constructor, seeds=range(10), test_ratio=0.2):
 
             results[f'eate {name_split}'].append(
                 eate(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split]))
+            results[f'pehe {name_split}'].append(
+                pehe(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split]))
     return results
 
 
