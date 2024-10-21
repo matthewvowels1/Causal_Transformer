@@ -27,7 +27,7 @@ Vowels, M.J., Rochat, M., and Akbari, S. (2024) CaTs and DAGs: Integrating Direc
 
 
 ```
-@misc{vowels2024catsdagsintegratingdirected,
+@misc{vowels2024catsanddags,
       title={CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions}, 
       author={Matthew J. Vowels and Mathieu Rochat and Sina Akbari},
       year={2024},
