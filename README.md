@@ -2,7 +2,7 @@
 
 ### Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions
 
-**Authors**: Vowels, M.J., Rochat, M., Akbari, S.
+Vowels, M.J., Rochat, M., Akbari, S. (2024)  https://arxiv.org/abs/2410.14485
 
 ---
 
