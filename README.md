@@ -38,3 +38,18 @@ These models are designed to operate under predefined causal constraints, as dic
 ### Citation
 
 If you find this work useful, please cite:
+
+Vowels, M.J., Rochat, M., and Akbari, S. (2024) CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions. arXiv preprint. arXiv:2410.14485
+
+
+```
+@misc{vowels2024catsdagsintegratingdirected,
+      title={CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions}, 
+      author={Matthew J. Vowels and Mathieu Rochat and Sina Akbari},
+      year={2024},
+      eprint={2410.14485},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2410.14485}, 
+}
+```
