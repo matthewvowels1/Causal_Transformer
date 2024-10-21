@@ -18,22 +18,6 @@ These models are designed to operate under predefined causal constraints, as dic
 
 ---
 
-### Key Features
-
-- **Causal Constraints**: Operate under predefined causal constraints via DAGs.
-- **Function Approximation**: Retain the powerful approximation abilities of traditional transformers and fully-connected networks.
-- **Robustness & Reliability**: More resistant to covariate shifts and other sources of instability in real-world applications.
-- **Improved Interpretability**: Easier to interpret/explain due to their adherence to the causal structures.
-- **Real-World Applicability**: Ideal for scenarios where robustness and explainability are crucial.
-
----
-
-### Model Families
-
-- **CaT (Causal Transformer)**: Transformer-based architectures that respect causal structures.
-- **CFCN (Causal Fully-Connected Network)**: Fully-connected neural networks designed to operate under causal constraints.
-
----
 
 ### Citation
 
