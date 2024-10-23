@@ -18,6 +18,7 @@ def evaluate(model_constructor, experiments=range(77), replications=range(10), s
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
 
+    intermediate_results = defaultdict(list)
     for replication, experiment in itertools.product(replications, experiments, desc="ACIC", disable=not verbose):
 
         data, y_potential, var_types = load_ACIC(experiment=experiment, replication=replication)
@@ -60,10 +61,18 @@ def evaluate(model_constructor, experiments=range(77), replications=range(10), s
             output0 = predict(model=model, data=dataset[name_split], ci=ci, interventions_nodes={'t': 0})
             output1 = predict(model=model, data=dataset[name_split], ci=ci, interventions_nodes={'t': 1})
 
-            results[f'eate {name_split}'].append(
-                eate(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split]))
-            results[f'pehe {name_split}'].append(
-                pehe(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split]))
+            r_eate = eate(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split])
+
+            results[f'eate {name_split}'].append(r_eate)
+            intermediate_results[f'eate {name_split}|{replication}'].append(r_eate)
+            r_pehe = pehe(ypred1=output1, ypred0=output0, ypotential=data_y_potential[name_split])
+            results[f'pehe {name_split}'].append(r_pehe)
+            intermediate_results[f'pehe {name_split}|{replication}'].append(r_pehe)
+
+    for key, values in intermediate_results.items():
+        mean = np.mean(values)
+        prefix = key.split('|')[0]
+        results[prefix + " experiment average"].append(mean)
     return results
 
 
