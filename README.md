@@ -1,8 +1,8 @@
 # CaTs and DAGs 🐱🐶
 
-### Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions
+### Integrating Directed Acyclic Graphs with Transformers for Causally Constrained Predictions
 
-Vowels, M.J., Rochat, M., Akbari, S. (2024)  https://arxiv.org/abs/2410.14485
+Vowels, M.J., Rochat, M., Akbari, S., Accepted to ICLR 2026, https://arxiv.org/abs/2410.14485
 
 ---
 
@@ -23,17 +23,14 @@ These models are designed to operate under predefined causal constraints, as dic
 
 If you find this work useful, please cite:
 
-Vowels, M.J., Rochat, M., and Akbari, S. (2024) CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions. arXiv preprint. arXiv:2410.14485
+Vowels, M.J., Rochat, M., and Akbari, S. (2026) CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions. ICLR.
 
 
 ```
-@misc{vowels2024catsanddags,
-      title={CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions}, 
-      author={Matthew J. Vowels and Mathieu Rochat and Sina Akbari},
-      year={2024},
-      eprint={2410.14485},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2410.14485}, 
+@inproceedings{vowels2026catsanddags,
+  title     = {CaTs and DAGs: Integrating Directed Acyclic Graphs with Transformers and Fully-Connected Neural Networks for Causally Constrained Predictions},
+  author    = {Vowels, Matthew J. and Rochat, Mathieu and Akbari, Sina},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2026},
 }
 ```
